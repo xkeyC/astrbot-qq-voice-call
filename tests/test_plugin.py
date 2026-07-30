@@ -23,7 +23,9 @@ async def test_disabled_plugin_completes_lifecycle_without_starting_runtime() ->
         return {"success": True}
 
     plugin = create_plugin()
-    plugin._set_context(PluginContext("org.maibot.qq-voice-call", rpc_call=rpc_call))
+    plugin._set_context(
+        PluginContext("github.claudiagardner.maibot-qq-voice-call", rpc_call=rpc_call)
+    )
     plugin.set_plugin_config(plugin.get_default_config())
     await plugin.on_load()
     assert plugin._runtime is None

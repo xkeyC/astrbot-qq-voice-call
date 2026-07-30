@@ -61,8 +61,8 @@ Runner 会根据配置模型生成 `config.toml`。完整示例见
 
 ## 插件 API
 
-- `org.maibot.qq-voice-call.get_call_status`：通话状态、最近 ASR/LLM/TTS 耗时
-- `org.maibot.qq-voice-call.test_phone_reply`：不公开的电话回复测试入口
+- `github.claudiagardner.maibot-qq-voice-call.get_call_status`：通话状态、最近 ASR/LLM/TTS 耗时
+- `github.claudiagardner.maibot-qq-voice-call.test_phone_reply`：不公开的电话回复测试入口
 
 ## 安全
 

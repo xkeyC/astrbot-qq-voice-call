@@ -1,0 +1,4 @@
+{
+  "plugin.name": "MaiBot QQ 语音通话",
+  "plugin.description": "通过外部 NapCat AV 桥实现低延迟 QQ 语音电话"
+}

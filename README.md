@@ -4,6 +4,9 @@
 NapCat AV 桥处理，把人物身份、近期消息、记忆查询和模型路由留在 MaiBot
 插件 SDK 内。
 
+它为 MaiBot 增加 QQ 实时语音通话入口，让电话里的麦麦继续复用 MaiBot
+的人设、记忆和模型体系。
+
 <p align="center">
   <img src="docs/assets/qq-voice-call-demo.png" alt="麦麦 QQ 语音通话界面" width="360">
 </p>

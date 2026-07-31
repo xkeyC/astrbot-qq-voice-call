@@ -51,8 +51,8 @@ export MAIBOT_QQ_CALL_BRIDGE_TOKEN="..."
 
 - `plugin.enabled = true`
 - `plugin.account_id`：机器人 QQ 号
-- `chat.task_name = "replyer"`
-- 在 MaiBot 模型管理中把 `ali-glm-5.2` 等电话模型加入 `replyer.model_list`
+- `chat.task_name = "utils"`（仓库默认值）
+- 在 MaiBot 模型管理中确认 `deepseek-v4-flash` 位于 `utils.model_list`
 - 正确的 PulseAudio capture/playback device
 - 正确的本地 AV 桥地址
 

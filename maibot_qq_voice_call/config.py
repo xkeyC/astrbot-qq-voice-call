@@ -90,8 +90,11 @@ class ChatSection(PluginConfigBase):
     __ui_order__ = 40
 
     task_name: str = Field(
-        default="replyer",
-        description="MaiBot 模型任务名；模型本身在该任务的 model_list 中配置",
+        default="utils",
+        description=(
+            "MaiBot 模型任务名；默认 utils 任务使用 deepseek-v4-flash，"
+            "模型本身在该任务的 model_list 中配置"
+        ),
     )
     temperature: float = Field(default=0.6, description="通话回复温度")
     max_tokens: int = Field(default=80, description="通话回复最大 Token 数")

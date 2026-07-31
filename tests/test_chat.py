@@ -17,6 +17,10 @@ class FakeLLM:
         return {"success": True, "response": "可以，我们继续。"}
 
 
+def test_default_chat_task_routes_to_deepseek_flash_task() -> None:
+    assert ChatSection().task_name == "utils"
+
+
 @pytest.mark.asyncio
 async def test_chat_routes_through_maibot_and_keeps_caller_context() -> None:
     llm = FakeLLM()

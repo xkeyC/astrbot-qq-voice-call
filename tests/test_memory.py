@@ -248,7 +248,7 @@ async def test_hangup_cancels_in_flight_reply_without_stopping_turn_worker() -> 
 
 
 @pytest.mark.asyncio
-async def test_new_speech_cancels_pending_reply_and_stops_old_tts() -> None:
+async def test_new_speech_only_stops_old_tts_without_cancelling_pending_reply() -> None:
     orchestrator = CallOrchestrator(
         SimpleNamespace(),
         QQVoiceCallConfig(),
@@ -261,7 +261,8 @@ async def test_new_speech_cancels_pending_reply_and_stops_old_tts() -> None:
 
     await orchestrator._on_speech_started()
 
-    assert orchestrator.speech_generation == 1
-    assert pending.cancelling()
-    orchestrator.chat.invalidate.assert_called_once_with()
+    assert orchestrator.speech_generation == 0
+    assert not pending.cancelling()
+    orchestrator.chat.invalidate.assert_not_called()
     orchestrator.stop_speaking.assert_awaited_once_with()
+    pending.cancel()

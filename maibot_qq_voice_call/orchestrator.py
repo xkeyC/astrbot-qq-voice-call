@@ -239,13 +239,13 @@ class CallOrchestrator:
             return False
 
     async def _on_speech_started(self) -> None:
-        """Make every older reply stale once sustained caller speech begins."""
+        """Interrupt audible TTS without killing a reply on raw VAD alone.
 
-        self.speech_generation += 1
-        self.chat.invalidate()
-        pending = self.pending_chat_task
-        if pending is not None and not pending.done():
-            pending.cancel()
+        The capture device can contain background speech.  A VAD event therefore
+        is not enough evidence that an in-flight model reply has become stale.
+        Call teardown still invalidates and cancels pending model work.
+        """
+
         await self.stop_speaking()
 
     async def _handle_transcript(self, transcript: str) -> None:
@@ -258,8 +258,8 @@ class CallOrchestrator:
         if accepted is None:
             self.status.ignored_utterance_count += 1
             return
-        # Interrupt only after ASR produced a meaningful turn. Raw VAD activity can
-        # be background speech and must not chop or reorder the assistant audio.
+        # A meaningful ASR turn may interrupt audible TTS. Raw VAD barge-in is kept
+        # separate and never invalidates model work because it can be background speech.
         await self.stop_speaking()
         self.status.utterance_count += 1
         self.status.last_transcript = accepted

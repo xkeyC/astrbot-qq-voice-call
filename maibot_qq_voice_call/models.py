@@ -60,3 +60,4 @@ class CallerContext:
 class CallUtterance:
     wav_bytes: bytes
     realtime_transcript: asyncio.Future[tuple[str, float]] | None = None
+    barge_in_candidate: bool = False

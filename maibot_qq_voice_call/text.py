@@ -36,6 +36,29 @@ _INCOMPLETE_SUFFIXES = (
     "所以现在",
 )
 _INCOMPLETE_EXACT = frozenset({"so", "and", "but", "because", "the"})
+_BARGE_IN_PREFIXES = (
+    "等等",
+    "等一下",
+    "等一等",
+    "停一下",
+    "停一停",
+    "先停一下",
+    "打住",
+    "别说了",
+    "不要说了",
+    "先别说",
+    "你先别说",
+    "听我说",
+    "先听我说",
+    "让我说",
+    "我说的是",
+    "不是这个",
+    "不对",
+)
+_ENGLISH_BARGE_IN_PATTERN = re.compile(
+    r"^\s*(?:please\s+)?(?:stop|wait|hold\s+on)\b",
+    re.IGNORECASE,
+)
 
 
 def normalize_turn_text(text: str) -> str:
@@ -55,6 +78,26 @@ def is_incomplete_transcript(text: str) -> bool:
             normalized.casefold() in _INCOMPLETE_EXACT
             or (len(normalized) <= 20 and normalized.endswith(_INCOMPLETE_SUFFIXES))
         )
+    )
+
+
+def is_barge_in_transcript(
+    text: str,
+    *,
+    wake_names: tuple[str, ...] = (),
+) -> bool:
+    """Recognize an intentional interruption after VAD marks a TTS overlap."""
+
+    normalized = normalize_turn_text(text)
+    if not normalized:
+        return False
+    folded = normalized.casefold()
+    for wake_name in wake_names:
+        normalized_name = normalize_turn_text(wake_name).casefold()
+        if normalized_name and folded.startswith(normalized_name):
+            return True
+    return folded.startswith(_BARGE_IN_PREFIXES) or bool(
+        _ENGLISH_BARGE_IN_PATTERN.match(text)
     )
 
 

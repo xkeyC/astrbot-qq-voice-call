@@ -65,7 +65,8 @@ WebUI Token。
 5. 无意义文本被丢弃；明显未说完的片段最多等待数秒合并。
 6. `ctx.llm.generate` 生成短回复。
 7. TTS 首包立即写入 QQ 麦克风。
-8. 对方持续说话时终止当前 TTS，并预热下一条 TTS 会话。
+8. 对方在 TTS 播放期间持续说话时只标记插话候选；ASR 识别出明确打断指令或
+   当前 MaiBot 昵称后才终止当前 TTS，并预热下一条 TTS 会话。
 
 ## Hangup memory lifecycle
 

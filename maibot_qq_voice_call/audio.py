@@ -56,7 +56,7 @@ class AudioSegmenter:
         status: RuntimeStatus,
         logger,
         *,
-        on_speech_started: Callable[[], Awaitable[object]] | None = None,
+        on_speech_started: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
         self.config = config
         self.status = status
@@ -118,6 +118,7 @@ class AudioSegmenter:
         noise_floor = -60.0
         streaming_asr_active = False
         barge_in_notified = False
+        barge_in_candidate = False
         max_frames = max(1, round(15_000 / self.config.frame_ms))
 
         while not stop_event.is_set():
@@ -138,6 +139,7 @@ class AudioSegmenter:
                         silent_frames = 0
                         streaming_asr_active = False
                         barge_in_notified = False
+                        barge_in_candidate = False
                         self.status.recording = False
                         continue
 
@@ -175,7 +177,10 @@ class AudioSegmenter:
                         and self.on_speech_started is not None
                     ):
                         barge_in_notified = True
-                        asyncio.create_task(self.on_speech_started())
+                        try:
+                            barge_in_candidate = bool(await self.on_speech_started())
+                        except Exception as exc:
+                            self.logger.debug("检查 TTS 插话候选失败: %s", exc)
 
                     reached_silence = (
                         silent_frames >= self.config.end_of_speech_frames
@@ -211,6 +216,7 @@ class AudioSegmenter:
                             CallUtterance(
                                 wav_bytes=wav_bytes,
                                 realtime_transcript=realtime_transcript,
+                                barge_in_candidate=barge_in_candidate,
                             )
                         )
                         self.status.queue_size = output_queue.qsize()
@@ -229,6 +235,7 @@ class AudioSegmenter:
                     silent_frames = 0
                     streaming_asr_active = False
                     barge_in_notified = False
+                    barge_in_candidate = False
                     self.status.recording = False
             except asyncio.CancelledError:
                 raise

@@ -19,6 +19,7 @@ class MaiBotPhoneChat:
         self._caller = CallerContext()
         self._history: deque[dict[str, str]] = deque(maxlen=config.history_messages)
         self._bot_identity = ""
+        self.nickname = "麦麦"
         self._generation = 0
         self.update_bot_config({})
 
@@ -49,6 +50,7 @@ class MaiBotPhoneChat:
         else:
             nickname = str(raw_nickname or "").strip()
         nickname = nickname or "麦麦"
+        self.nickname = nickname
         identity = (
             str(personality.get("personality") or "").strip()
             if isinstance(personality, dict)

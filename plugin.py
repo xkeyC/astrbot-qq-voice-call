@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, ClassVar
 
 from maibot_sdk import (
@@ -16,9 +18,16 @@ from maibot_sdk import (
     MessageGateway,
 )
 
-from maibot_qq_voice_call.config import QQVoiceCallConfig
-from maibot_qq_voice_call.constants import CALL_ARCHIVE_PREFIX, GATEWAY_NAME
-from maibot_qq_voice_call.orchestrator import CallOrchestrator
+# MaiBot loads plugin.py through an isolated importlib spec and does not add the
+# plugin directory to sys.path. Add only this repository root so the bundled
+# runtime package remains importable without requiring a separate pip install.
+_PLUGIN_ROOT = str(Path(__file__).resolve().parent)
+if _PLUGIN_ROOT not in sys.path:
+    sys.path.insert(0, _PLUGIN_ROOT)
+
+from maibot_qq_voice_call.config import QQVoiceCallConfig  # noqa: E402
+from maibot_qq_voice_call.constants import CALL_ARCHIVE_PREFIX, GATEWAY_NAME  # noqa: E402
+from maibot_qq_voice_call.orchestrator import CallOrchestrator  # noqa: E402
 
 
 class QQVoiceCallPlugin(MaiBotPlugin):

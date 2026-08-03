@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-03
+
+### Fixed
+
+- Make the bundled Python package importable under MaiBot's isolated plugin loader.
+- Enable the external NapCat plugin during Bridge installation.
+- Prevent duplicate supervised AV Host processes during overlapping restarts.
+
 ## [0.3.0] - 2026-08-03
 
 ### Added
@@ -41,7 +49,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Adaptive VAD, incomplete-turn merging, barge-in and soft-limited gain.
 - Runtime status and private reply-test plugin APIs.
 
-[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/releases/tag/v0.1.0

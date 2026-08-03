@@ -73,6 +73,8 @@ loader_path="$qq_app_dir/loadNapCat.js"
 backup_path="$qq_app_dir/loadNapCat.maibot-qq-call.backup.cjs"
 plugin_dir="$napcat_dir/plugins/napcat-plugin-maibot-qq-voice-call"
 token_file="$install_dir/runtime/control.token"
+plugins_config="$napcat_dir/config/plugins.json"
+python_bin=${PYTHON_BIN:-python3}
 
 if [[ -n $original_loader ]]; then
   original_loader=$(readlink -f -- "$original_loader")
@@ -115,6 +117,14 @@ fi
   printf 'QQ AVSDK library was not found under %s\n' "$qq_dir" >&2
   exit 1
 }
+command -v "$python_bin" >/dev/null 2>&1 || {
+  printf 'Python is required to update the NapCat plugin status: %s\n' "$python_bin" >&2
+  exit 1
+}
+[[ -d "$napcat_dir/config" ]] || {
+  printf 'NapCat config directory was not found under %s\n' "$napcat_dir" >&2
+  exit 1
+}
 loader_hook_installed=0
 if grep -q 'MAIBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path"; then
   loader_hook_installed=1
@@ -149,8 +159,10 @@ EOF
   exit 0
 fi
 
-if [[ ! -w "$loader_path" || ! -w "$qq_app_dir" || ! -w "$napcat_dir/plugins" ]]; then
-  printf 'QQ Loader or NapCat plugins directory is not writable; rerun with suitable permissions\n' >&2
+if [[ ! -w "$loader_path" || ! -w "$qq_app_dir" || ! -w "$napcat_dir/plugins" || \
+  ( -e "$plugins_config" && ! -w "$plugins_config" ) || \
+  ( ! -e "$plugins_config" && ! -w "$napcat_dir/config" ) ]]; then
+  printf 'QQ Loader, NapCat plugin, or config path is not writable; rerun with suitable permissions\n' >&2
   exit 1
 fi
 
@@ -197,6 +209,35 @@ cat >"$plugin_dir/bridge-config.json" <<EOF
 EOF
 chmod 0600 "$plugin_dir/bridge-config.json"
 
+"$python_bin" - "$plugins_config" <<'PY'
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if path.exists():
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SystemExit(f"NapCat plugin status is not a JSON object: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+else:
+    data = {}
+    mode = 0o600
+data["napcat-plugin-maibot-qq-voice-call"] = True
+temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+try:
+    temporary.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.chmod(mode)
+    os.replace(temporary, path)
+finally:
+    temporary.unlink(missing_ok=True)
+PY
+
 if [[ $loader_hook_installed -eq 0 ]]; then
   if [[ -n $original_loader ]]; then
     cp -p -- "$original_loader" "$backup_path"
@@ -226,6 +267,7 @@ cat <<EOF
 MaiBot QQ voice-call bridge installed.
 
 NapCat plugin: $plugin_dir
+Plugin enabled: $plugins_config
 Bridge runtime: $install_dir
 Token file:     $token_file
 

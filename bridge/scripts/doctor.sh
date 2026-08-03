@@ -9,7 +9,7 @@ failures=0
 ok() { printf '[ok] %s\n' "$1"; }
 bad() { printf '[fail] %s\n' "$1" >&2; failures=$((failures + 1)); }
 
-for command in curl pactl parec pacat pulseaudio xvfb-run; do
+for command in curl flock pactl parec pacat pulseaudio xvfb-run; do
   if command -v "$command" >/dev/null 2>&1; then ok "command: $command"; else bad "missing command: $command"; fi
 done
 
@@ -29,6 +29,14 @@ if [[ -f "$qq_dir/resources/app/loadNapCat.js" ]] && \
   ok "reversible QQ loader hook"
 else
   bad "QQ loader hook is not installed"
+fi
+
+if [[ -f "$napcat_dir/config/plugins.json" ]] && \
+  grep -Eq '"napcat-plugin-maibot-qq-voice-call"[[:space:]]*:[[:space:]]*true' \
+    "$napcat_dir/config/plugins.json"; then
+  ok "NapCat plugin enabled"
+else
+  bad "NapCat plugin is not enabled in config/plugins.json"
 fi
 
 if "$script_dir/audio-control.sh" status >/dev/null 2>&1; then

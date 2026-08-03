@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -13,6 +15,32 @@ PLUGIN_MODULE = importlib.util.module_from_spec(PLUGIN_SPEC)
 PLUGIN_SPEC.loader.exec_module(PLUGIN_MODULE)
 GATEWAY_NAME = PLUGIN_MODULE.GATEWAY_NAME
 create_plugin = PLUGIN_MODULE.create_plugin
+
+
+def test_entrypoint_loads_with_maibot_isolated_import_semantics() -> None:
+    script = f"""
+import importlib.util
+import sys
+
+plugin_path = {str(PLUGIN_PATH)!r}
+plugin_root = plugin_path.rsplit('plugin.py', 1)[0].rstrip('\\\\/')
+assert all(
+    plugin_root != item.rstrip('\\\\/')
+    for item in sys.path
+)
+spec = importlib.util.spec_from_file_location('isolated_qq_voice_call_plugin', plugin_path)
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+assert callable(module.create_plugin)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_release_versions_stay_in_sync() -> None:

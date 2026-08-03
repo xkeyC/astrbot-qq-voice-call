@@ -10,7 +10,7 @@ class PluginSection(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="0.3.0", description="插件配置结构版本")
+    config_version: str = Field(default="0.3.1", description="插件配置结构版本")
     enabled: bool = Field(default=False, description="启用 QQ 语音通话插件")
     account_id: str = Field(default="", description="QQ 机器人账号，用于网关状态上报")
     scope: str = Field(default="primary", description="MaiBot 多账号路由作用域")

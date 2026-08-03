@@ -6,12 +6,19 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 source "$script_dir/common.sh"
 
 require_command xvfb-run
+require_command flock
 require_file "$qq_dir/qq"
 require_file "$avsdk_path"
 require_file "$bridge_dir/av-host/host.cjs"
 require_file "$token_file"
 "$script_dir/audio-control.sh" start >/dev/null
 ensure_runtime_dirs
+
+exec 9>"$runtime_dir/av-host.lock"
+if ! flock -n 9; then
+  printf '[MaiBotQQCallAVHost] another supervised AV host is already running\n' >&2
+  exit 0
+fi
 
 export MAIBOT_QQ_CALL_AV_HOST=1
 export MAIBOT_QQ_CALL_AV_HOST_ENTRY="$bridge_dir/av-host/host.cjs"

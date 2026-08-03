@@ -470,7 +470,7 @@ async function handleAVSDKOutput(body) {
 
 function publicStatus() {
   return {
-    version: "0.3.0",
+    version: "0.3.1",
     startedAt: state.startedAt,
     listenerRegistered: state.listenerRegistered,
     listenerError: state.listenerError,

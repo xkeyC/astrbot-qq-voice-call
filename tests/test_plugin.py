@@ -46,8 +46,30 @@ def test_manifest_declares_every_host_capability_used_by_runtime() -> None:
         "llm.generate",
         "llm.transcribe_audio",
         "chat.open_session",
+        "maisaka.context.append",
         "message.get_recent",
         "message.build_readable",
         "person.get_id",
         "person.get_value",
     }
+
+
+@pytest.mark.asyncio
+async def test_archive_command_silently_intercepts_synthetic_message() -> None:
+    plugin = create_plugin()
+    handled, response, intercept_level = await plugin.handle_call_archive(
+        processed_plain_text="[QQ语音通话记录]\n通话摘要：测试"
+    )
+    assert handled is True
+    assert response is None
+    assert intercept_level == 1
+
+
+def test_plugin_registers_archive_command() -> None:
+    plugin = create_plugin()
+    components = plugin.get_components()
+    assert any(
+        component["type"] == "COMMAND"
+        and component["name"] == "qq_voice_call_archive"
+        for component in components
+    )

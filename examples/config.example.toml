@@ -1,5 +1,5 @@
 [plugin]
-config_version = "0.1.0"
+config_version = "0.2.0"
 enabled = true
 account_id = "YOUR_BOT_QQ"
 scope = "primary"
@@ -59,3 +59,18 @@ websocket_base_url = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 sample_rate = 24000
 gain_db = 8.0
 speech_rate = 1.08
+
+[memory]
+enabled = true
+summary_task_name = "utils"
+summary_temperature = 0.2
+summary_max_tokens = 320
+min_turns = 1
+max_turns = 24
+max_transcript_chars = 6000
+max_summary_chars = 240
+max_facts = 6
+include_transcript = true
+persist_private_session = true
+append_maisaka_context = true
+write_timeout_seconds = 20.0

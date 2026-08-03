@@ -10,7 +10,7 @@ class PluginSection(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="0.1.0", description="插件配置结构版本")
+    config_version: str = Field(default="0.2.0", description="插件配置结构版本")
     enabled: bool = Field(default=False, description="启用 QQ 语音通话插件")
     account_id: str = Field(default="", description="QQ 机器人账号，用于网关状态上报")
     scope: str = Field(default="primary", description="MaiBot 多账号路由作用域")
@@ -148,6 +148,35 @@ class TTSSection(PluginConfigBase):
     speech_rate: float = Field(default=1.08, description="语速倍率")
 
 
+class MemorySection(PluginConfigBase):
+    __ui_label__ = "通话记忆"
+    __ui_icon__ = "brain"
+    __ui_order__ = 60
+
+    enabled: bool = Field(default=True, description="挂断后整理并写回 MaiBot 私聊记忆")
+    summary_task_name: str = Field(
+        default="utils",
+        description="生成通话摘要和人物事实所用的 MaiBot 模型任务名",
+    )
+    summary_temperature: float = Field(default=0.2, description="通话摘要模型温度")
+    summary_max_tokens: int = Field(default=320, description="通话摘要最大 Token 数")
+    min_turns: int = Field(default=1, description="触发归档所需的最少有效对话轮数")
+    max_turns: int = Field(default=24, description="单次归档保留的最大有效对话轮数")
+    max_transcript_chars: int = Field(default=6000, description="有效对话文本最大字符数")
+    max_summary_chars: int = Field(default=240, description="通话摘要最大字符数")
+    max_facts: int = Field(default=6, description="最多写回的关键人物事实数")
+    include_transcript: bool = Field(default=True, description="归档中包含清洗后的有效对话")
+    persist_private_session: bool = Field(
+        default=True,
+        description="通过消息网关持久化到来电者的 MaiBot 私聊历史",
+    )
+    append_maisaka_context: bool = Field(
+        default=True,
+        description="同时追加到当前 Maisaka 上下文，使后续回复立即可见",
+    )
+    write_timeout_seconds: float = Field(default=20.0, description="单次挂断归档超时")
+
+
 class QQVoiceCallConfig(PluginConfigBase):
     """Complete runtime configuration."""
 
@@ -157,3 +186,4 @@ class QQVoiceCallConfig(PluginConfigBase):
     asr: ASRSection = Field(default_factory=ASRSection)
     chat: ChatSection = Field(default_factory=ChatSection)
     tts: TTSSection = Field(default_factory=TTSSection)
+    memory: MemorySection = Field(default_factory=MemorySection)

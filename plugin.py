@@ -11,14 +11,14 @@ from maibot_sdk import (
     API,
     CONFIG_RELOAD_SCOPE_SELF,
     ON_BOT_CONFIG_RELOAD,
+    Command,
     MaiBotPlugin,
     MessageGateway,
 )
 
 from maibot_qq_voice_call.config import QQVoiceCallConfig
+from maibot_qq_voice_call.constants import CALL_ARCHIVE_PREFIX, GATEWAY_NAME
 from maibot_qq_voice_call.orchestrator import CallOrchestrator
-
-GATEWAY_NAME = "qq_voice_call"
 
 
 class QQVoiceCallPlugin(MaiBotPlugin):
@@ -100,8 +100,16 @@ class QQVoiceCallPlugin(MaiBotPlugin):
         if runtime is not None:
             runtime.stop_event.set()
         if task is not None and not task.done():
+            memory_timeout = (
+                runtime.config.memory.write_timeout_seconds
+                if runtime is not None
+                else self.config.memory.write_timeout_seconds
+            )
             with contextlib.suppress(asyncio.CancelledError, TimeoutError):
-                await asyncio.wait_for(task, timeout=10)
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=max(10.0, memory_timeout + 2.0),
+                )
         if task is not None and not task.done():
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -123,9 +131,27 @@ class QQVoiceCallPlugin(MaiBotPlugin):
         # Receive-only gateways are never selected for MaiBot outbound messages.
         return {"success": True}
 
+    @Command(
+        "qq_voice_call_archive",
+        pattern=r"^\[QQ语音通话记录\]",
+        description="内部通话记忆归档入口",
+    )
+    async def handle_call_archive(self, **kwargs: Any) -> tuple[bool, None, int]:
+        """Persist the synthetic call record without sending a text reply."""
+
+        message_text = str(
+            kwargs.get("processed_plain_text")
+            or kwargs.get("message_text")
+            or kwargs.get("text")
+            or ""
+        )
+        if message_text and not message_text.startswith(CALL_ARCHIVE_PREFIX):
+            return False, None, 0
+        return True, None, 1
+
     @API(
         "get_call_status",
-        description="获取 QQ 语音通话运行状态与最近一次链路耗时",
+        description="获取 QQ 语音通话状态、链路耗时和最近一次记忆写回结果",
         version="1",
         public=True,
     )

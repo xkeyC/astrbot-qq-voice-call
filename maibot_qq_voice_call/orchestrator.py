@@ -16,6 +16,7 @@ from .bridge import BridgeClient
 from .chat import MaiBotPhoneChat
 from .config import QQVoiceCallConfig
 from .context import CallerContextResolver
+from .memory import CallArchive, CallMemoryWriter, CallTurn, MemoryWriteResult
 from .models import CallerContext, CallUtterance, RuntimeStatus
 from .providers import (
     DashScopeRealtimeASR,
@@ -42,6 +43,7 @@ class CallOrchestrator:
         self.bridge: BridgeClient | None = None
         self.chat = MaiBotPhoneChat(ctx, config.chat)
         self.context_resolver = CallerContextResolver(ctx, config.chat)
+        self.memory_writer = CallMemoryWriter(ctx, config.memory, logger)
         self.tts: DashScopeRealtimeTTS | None = None
         self.streaming_asr: DashScopeRealtimeASR | None = None
         self.segmenter = AudioSegmenter(
@@ -60,6 +62,10 @@ class CallOrchestrator:
         self.context_active_invite = ""
         self.last_greeted_invite = ""
         self.caller_context = CallerContext()
+        self.call_archive_invite = ""
+        self.call_started_at = 0.0
+        self.call_turns: list[CallTurn] = []
+        self.memory_tasks: set[asyncio.Task[None]] = set()
 
     async def startup(self) -> None:
         if self.config.asr.backend not in {"dashscope-realtime", "maibot"}:
@@ -107,6 +113,7 @@ class CallOrchestrator:
             if self.closed:
                 return
             self.closed = True
+            self._finish_call()
             self.stop_event.set()
             self.active_call.clear()
             await self.segmenter.close()
@@ -116,6 +123,7 @@ class CallOrchestrator:
                 await self.tts.close()
             if self.http_session is not None:
                 await self.http_session.close()
+            await self._drain_memory_tasks()
             self.status.ready = False
             self.status.active = False
 
@@ -198,7 +206,7 @@ class CallOrchestrator:
             snapshot.recent_message_count,
         )
 
-    async def speak(self, text: str) -> None:
+    async def speak(self, text: str) -> bool:
         if self.tts is None:
             raise RuntimeError("TTS 客户端尚未初始化")
         spoken_text = clean_tts_text(
@@ -206,14 +214,15 @@ class CallOrchestrator:
             max_chars=self.config.chat.max_reply_chars,
         )
         if not spoken_text:
-            return
+            return False
         try:
             first_audio_seconds = await self.tts.start(spoken_text)
         except TTSPlaybackInterrupted:
             self.logger.info("TTS 在首包前被来电者插话打断")
-            return
+            return False
         self.status.last_tts_seconds = round(first_audio_seconds, 3)
         self.logger.info("TTS 首个音频包耗时 %.3f 秒", first_audio_seconds)
+        return True
 
     async def stop_speaking(self) -> bool:
         if self.tts is None:
@@ -248,7 +257,16 @@ class CallOrchestrator:
         if self.config.plugin.log_transcripts:
             self.logger.info("通话回复: %s", reply)
         if self.active_call.is_set():
-            await self.speak(reply)
+            spoken = await self.speak(reply)
+            if spoken and self.active_call.is_set() and self.call_archive_invite:
+                self.call_turns.append(
+                    CallTurn(
+                        caller_text=accepted,
+                        assistant_text=reply,
+                        timestamp=time.time(),
+                    )
+                )
+                self.status.current_call_turn_count = len(self.call_turns)
 
     async def process_utterances(self) -> None:
         while not self.stop_event.is_set():
@@ -313,6 +331,129 @@ class CallOrchestrator:
         self.transcript_gate.clear()
         self.status.pending_transcript = ""
 
+    def _begin_call(self, invite_at: str) -> None:
+        if self.call_archive_invite == invite_at:
+            return
+        self.call_archive_invite = invite_at
+        self.call_started_at = time.time()
+        self.call_turns = []
+        self.caller_context = CallerContext()
+        self.status.current_call_turn_count = 0
+        self.status.caller_uid = ""
+        self.status.caller_uin = ""
+        self.status.caller_name = ""
+        self.status.caller_person_id = ""
+        self.status.caller_stream_id = ""
+        self.status.caller_context_ready = False
+
+    def _finish_call(self) -> None:
+        if not self.call_archive_invite:
+            return
+        archive = CallArchive(
+            invite_at=self.call_archive_invite,
+            caller=self.caller_context,
+            turns=tuple(self.call_turns),
+            started_at=self.call_started_at or time.time(),
+            ended_at=time.time(),
+            account_id=self.config.plugin.account_id,
+            scope=self.config.plugin.scope,
+        )
+        self.call_archive_invite = ""
+        self.call_started_at = 0.0
+        self.call_turns = []
+        self.status.current_call_turn_count = 0
+        self.context_active_invite = ""
+        self.transcript_gate.clear()
+        self.status.pending_transcript = ""
+        if not self.config.memory.enabled:
+            return
+        task = asyncio.create_task(
+            self._write_call_memory(archive),
+            name=f"qq-call-memory-{archive.invite_at}",
+        )
+        self.memory_tasks.add(task)
+        task.add_done_callback(self.memory_tasks.discard)
+
+    async def _write_call_memory(self, archive: CallArchive) -> None:
+        started_at = time.perf_counter()
+        try:
+            result = await asyncio.wait_for(
+                self.memory_writer.write(archive),
+                timeout=max(0.1, self.config.memory.write_timeout_seconds),
+            )
+        except TimeoutError:
+            self.status.last_memory_write_success = False
+            self.status.last_memory_error = "通话记忆写回超时"
+            self.logger.warning("通话记忆写回超时: invite=%s", archive.invite_at)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.status.last_memory_write_success = False
+            self.status.last_memory_error = str(exc)
+            self.logger.exception("通话记忆写回失败: invite=%s", archive.invite_at)
+        else:
+            self._update_memory_status(archive, result)
+        finally:
+            self.status.last_memory_write_seconds = round(
+                time.perf_counter() - started_at,
+                3,
+            )
+
+    def _update_memory_status(
+        self,
+        archive: CallArchive,
+        result: MemoryWriteResult,
+    ) -> None:
+        self.status.last_memory_write_success = result.success
+        self.status.last_memory_summary = result.summary
+        self.status.last_memory_fact_count = len(result.facts)
+        self.status.last_memory_error = ""
+        if result.skipped_reason:
+            if result.success:
+                self.logger.info(
+                    "跳过通话记忆写回: invite=%s reason=%s",
+                    archive.invite_at,
+                    result.skipped_reason,
+                )
+            else:
+                self.status.last_memory_error = result.skipped_reason
+                self.logger.warning(
+                    "通话记忆写回失败: invite=%s reason=%s",
+                    archive.invite_at,
+                    result.skipped_reason,
+                )
+            return
+        if not result.success:
+            self.status.last_memory_error = (
+                "通话记录未完整写入 MaiBot 私聊历史和当前上下文"
+            )
+            self.logger.warning(
+                "通话记忆写回不完整: invite=%s persisted=%s context=%s",
+                archive.invite_at,
+                result.persisted,
+                result.context_appended,
+            )
+            return
+        self.logger.info(
+            "通话记忆已写回: invite=%s turns=%d facts=%d",
+            archive.invite_at,
+            result.turn_count,
+            len(result.facts),
+        )
+
+    async def _drain_memory_tasks(self) -> None:
+        tasks = tuple(self.memory_tasks)
+        if not tasks:
+            return
+        _, pending = await asyncio.wait(
+            tasks,
+            timeout=max(0.1, self.config.memory.write_timeout_seconds + 0.5),
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     async def monitor_calls(self) -> None:
         assert self.bridge is not None
         while not self.stop_event.is_set():
@@ -323,6 +464,9 @@ class CallOrchestrator:
                 self.status.call_phase = phase
                 self.status.invite_at = invite_at
                 if phase == "connected" and invite_at:
+                    if self.call_archive_invite and self.call_archive_invite != invite_at:
+                        self._finish_call()
+                    self._begin_call(invite_at)
                     if self.context_active_invite != invite_at:
                         await self.prepare_caller_context(invite_at, call)
                     self.active_call.set()
@@ -332,9 +476,10 @@ class CallOrchestrator:
                         self.logger.info("QQ 语音通话已进入房间")
                         asyncio.create_task(self.greet(invite_at))
                 elif phase in {"ringing", "accepting", "accepted"}:
-                    self.active_call.clear()
-                    self.status.active = False
+                    self._finish_call()
+                    self._reset_call_state()
                 else:
+                    self._finish_call()
                     self._reset_call_state()
             except asyncio.CancelledError:
                 raise

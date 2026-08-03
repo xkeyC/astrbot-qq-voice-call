@@ -32,6 +32,12 @@ class RuntimeStatus:
     last_asr_seconds: float = 0.0
     last_chat_seconds: float = 0.0
     last_tts_seconds: float = 0.0
+    current_call_turn_count: int = 0
+    last_memory_write_success: bool | None = None
+    last_memory_write_seconds: float = 0.0
+    last_memory_summary: str = ""
+    last_memory_fact_count: int = 0
+    last_memory_error: str = ""
     last_error: str = ""
 
     def to_dict(self) -> dict[str, Any]:

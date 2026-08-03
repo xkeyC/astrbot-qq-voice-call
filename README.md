@@ -18,14 +18,32 @@ NapCat AV 桥处理，把人物身份、近期消息、记忆查询和模型路�
 3. `ctx.person`、`ctx.chat` 和 `ctx.message` 组装来电者上下文。
 4. `ctx.llm` 调用 MaiBot 已配置的电话回复模型，不经过 Planner。
 5. Qwen3 实时克隆 TTS 将首包直接送进 QQ 麦克风。
+6. 挂断后清洗有效对话，生成摘要和有原话证据的关键人物事实，并静默写回
+   对应来电者的 MaiBot 私聊。
 
 仓库不包含 NapCat、QQ、IndexTTS、GPT-SoVITS 或其他本地推理模型。
 
 ## 状态
 
-这是从一套麦麦 QQ 语音通话部署迁移出的 `0.1.0` 版本。插件骨架、SDK 上下文、
+这是从一套麦麦 QQ 语音通话部署迁移出的 `0.2.0` 版本。插件骨架、SDK 上下文、
 实时 ASR、LLM、实时 TTS、VAD、插话打断和运行状态 API 已迁移；NapCat
 AV 桥仍作为外部组件部署。
+
+## 挂断后的记忆回写
+
+每次已接通的电话结束后，插件会在后台完成以下操作，不阻塞下一次来电：
+
+1. 再次过滤语气词、噪声误识别、重复内容、未完成句子、`[WAIT]` 和内部控制文本。
+2. 只保留对方有效发言与麦麦实际开始播放的回复，整理成角色明确的通话记录。
+3. 通过 MaiBot 的模型任务生成简短摘要；人物事实必须带有对方逐字原话证据，
+   不把麦麦的回复或模型推断当成来电者事实。
+4. 通过消息网关把记录写进该 QQ 来电者的私聊历史，并用内部 Command 静默拦截，
+   因而挂断后不会额外向 QQ 发送一条文字回复。
+5. 同时把同一记录追加到 Maisaka 当前上下文；持久化后的私聊记录会继续作为
+   MaiBot 正常记忆学习链路的对话证据。
+
+这一过程只使用公开插件 SDK，不直接读写 MaiBot 数据库。可在 WebUI 的
+`memory` 配置段关闭写回、调整摘要任务或限制归档长度。
 
 ## 要求
 
@@ -60,6 +78,7 @@ export MAIBOT_QQ_CALL_BRIDGE_TOKEN="..."
 - `plugin.account_id`：机器人 QQ 号
 - `chat.task_name = "utils"`（仓库默认值）
 - 在 MaiBot 模型管理中确认 `deepseek-v4-flash` 位于 `utils.model_list`
+- `memory.summary_task_name = "utils"`（默认复用同一轻量模型任务）
 - 正确的 PulseAudio capture/playback device
 - 正确的本地 AV 桥地址
 
@@ -68,7 +87,8 @@ Runner 会根据配置模型生成 `config.toml`。完整示例见
 
 ## 插件 API
 
-- `github.claudiagardner.maibot-qq-voice-call.get_call_status`：通话状态、最近 ASR/LLM/TTS 耗时
+- `github.claudiagardner.maibot-qq-voice-call.get_call_status`：通话状态、最近 ASR/LLM/TTS
+  耗时及最后一次记忆写回结果
 - `github.claudiagardner.maibot-qq-voice-call.test_phone_reply`：不公开的电话回复测试入口
 
 ## 安全

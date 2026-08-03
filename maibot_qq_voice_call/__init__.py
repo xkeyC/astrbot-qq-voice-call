@@ -3,4 +3,4 @@
 from .models import CallerContext, RuntimeStatus
 
 __all__ = ["CallerContext", "RuntimeStatus"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

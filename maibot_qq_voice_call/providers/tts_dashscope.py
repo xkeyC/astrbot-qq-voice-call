@@ -353,16 +353,12 @@ class DashScopeRealtimeTTS:
             time.perf_counter() - started_at,
         )
 
-    async def is_playing(self) -> bool:
-        """Return whether TTS is generating or still has queued audible audio."""
-
+    async def stop(self) -> bool:
         async with self.state_lock:
-            return bool(
+            was_playing = bool(
                 self.response_active or time.monotonic() < self.playback_until + 0.03
             )
-
-    async def stop(self) -> bool:
-        if not await self.is_playing():
+        if not was_playing:
             return False
         async with self.connection_lock:
             await self._disconnect_locked(interrupted=True)

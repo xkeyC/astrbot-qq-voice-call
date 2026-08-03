@@ -1,5 +1,3 @@
-import asyncio
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -50,19 +48,3 @@ async def test_playback_process_keeps_safe_latency_floor(monkeypatch) -> None:
     await tts._spawn_playback_process()
 
     assert "--latency-msec=20" in captured
-
-
-@pytest.mark.asyncio
-async def test_is_playing_covers_generation_and_queued_audio() -> None:
-    tts = object.__new__(DashScopeRealtimeTTS)
-    tts.state_lock = asyncio.Lock()
-    tts.response_active = True
-    tts.playback_until = 0.0
-    assert await tts.is_playing() is True
-
-    tts.response_active = False
-    tts.playback_until = time.monotonic() + 0.2
-    assert await tts.is_playing() is True
-
-    tts.playback_until = time.monotonic() - 1.0
-    assert await tts.is_playing() is False

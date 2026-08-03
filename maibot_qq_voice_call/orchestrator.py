@@ -23,7 +23,7 @@ from .providers import (
     DashScopeRealtimeTTS,
     TTSPlaybackInterrupted,
 )
-from .text import WAIT_TOKEN, TranscriptGate, clean_tts_text, is_barge_in_transcript
+from .text import WAIT_TOKEN, TranscriptGate, clean_tts_text
 
 ReadyCallback = Callable[[bool], Awaitable[None]]
 
@@ -238,33 +238,20 @@ class CallOrchestrator:
             self.logger.debug("停止上一段 TTS 失败: %s", exc)
             return False
 
-    async def _on_speech_started(self) -> bool:
-        """Snapshot whether this utterance began while TTS was audible.
+    async def _on_speech_started(self) -> None:
+        """Interrupt audible TTS without killing a reply on raw VAD alone.
 
-        Raw VAD only creates a barge-in candidate.  The completed ASR transcript
-        must confirm an intentional interruption before playback is stopped.
+        The capture device can contain background speech.  A VAD event therefore
+        is not enough evidence that an in-flight model reply has become stale.
+        Call teardown still invalidates and cancels pending model work.
         """
 
-        if self.tts is None:
-            return False
-        return await self.tts.is_playing()
+        await self.stop_speaking()
 
-    async def _handle_transcript(
-        self,
-        transcript: str,
-        *,
-        barge_in_candidate: bool = False,
-    ) -> None:
+    async def _handle_transcript(self, transcript: str) -> None:
         self.status.last_transcript = transcript
         if self.config.plugin.log_transcripts:
             self.logger.info("用户说: %s", transcript)
-
-        if barge_in_candidate and is_barge_in_transcript(
-            transcript,
-            wake_names=(getattr(self.chat, "nickname", "麦麦"),),
-        ):
-            self.logger.info("ASR 已确认来电者的插话意图: %s", transcript)
-            await self.stop_speaking()
 
         accepted = self.transcript_gate.process(transcript)
         self.status.pending_transcript = self.transcript_gate.pending_text
@@ -362,10 +349,7 @@ class CallOrchestrator:
                             3,
                         )
                     if transcript:
-                        await self._handle_transcript(
-                            transcript,
-                            barge_in_candidate=utterance.barge_in_candidate,
-                        )
+                        await self._handle_transcript(transcript)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:

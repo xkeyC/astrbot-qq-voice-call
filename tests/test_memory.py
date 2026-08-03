@@ -248,7 +248,7 @@ async def test_hangup_cancels_in_flight_reply_without_stopping_turn_worker() -> 
 
 
 @pytest.mark.asyncio
-async def test_raw_vad_only_marks_barge_in_candidate() -> None:
+async def test_new_speech_only_stops_old_tts_without_cancelling_pending_reply() -> None:
     orchestrator = CallOrchestrator(
         SimpleNamespace(),
         QQVoiceCallConfig(),
@@ -258,15 +258,13 @@ async def test_raw_vad_only_marks_barge_in_candidate() -> None:
     orchestrator.pending_chat_task = pending
     orchestrator.chat.invalidate = Mock()
     orchestrator.stop_speaking = AsyncMock(return_value=True)
-    orchestrator.tts = SimpleNamespace(is_playing=AsyncMock(return_value=True))
 
-    candidate = await orchestrator._on_speech_started()
+    await orchestrator._on_speech_started()
 
-    assert candidate is True
     assert orchestrator.speech_generation == 0
     assert not pending.cancelling()
     orchestrator.chat.invalidate.assert_not_called()
-    orchestrator.stop_speaking.assert_not_awaited()
+    orchestrator.stop_speaking.assert_awaited_once_with()
     pending.cancel()
 
 
@@ -285,65 +283,3 @@ async def test_completed_transcript_does_not_repeat_barge_in() -> None:
     await orchestrator._handle_transcript("a complete meaningful transcript")
 
     orchestrator.stop_speaking.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_confirmed_barge_in_stops_tts_before_new_turn() -> None:
-    orchestrator = CallOrchestrator(
-        SimpleNamespace(),
-        QQVoiceCallConfig(),
-        logging.getLogger(__name__),
-    )
-    orchestrator.active_call.set()
-    orchestrator.call_archive_invite = "invite-active"
-    orchestrator.chat.ask = AsyncMock(return_value=WAIT_TOKEN)
-    orchestrator.stop_speaking = AsyncMock(return_value=True)
-
-    await orchestrator._handle_transcript(
-        "等等，先听我说",
-        barge_in_candidate=True,
-    )
-
-    orchestrator.stop_speaking.assert_awaited_once_with()
-    orchestrator.chat.ask.assert_awaited_once_with("等等，先听我说")
-
-
-@pytest.mark.asyncio
-async def test_background_transcript_does_not_confirm_barge_in() -> None:
-    orchestrator = CallOrchestrator(
-        SimpleNamespace(),
-        QQVoiceCallConfig(),
-        logging.getLogger(__name__),
-    )
-    orchestrator.active_call.set()
-    orchestrator.call_archive_invite = "invite-active"
-    orchestrator.chat.ask = AsyncMock(return_value=WAIT_TOKEN)
-    orchestrator.stop_speaking = AsyncMock(return_value=True)
-
-    await orchestrator._handle_transcript(
-        "今天天气还不错",
-        barge_in_candidate=True,
-    )
-
-    orchestrator.stop_speaking.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_current_maibot_nickname_confirms_barge_in() -> None:
-    orchestrator = CallOrchestrator(
-        SimpleNamespace(),
-        QQVoiceCallConfig(),
-        logging.getLogger(__name__),
-    )
-    orchestrator.active_call.set()
-    orchestrator.call_archive_invite = "invite-active"
-    orchestrator.chat.nickname = "麦麦"
-    orchestrator.chat.ask = AsyncMock(return_value=WAIT_TOKEN)
-    orchestrator.stop_speaking = AsyncMock(return_value=True)
-
-    await orchestrator._handle_transcript(
-        "麦麦，停一下",
-        barge_in_candidate=True,
-    )
-
-    orchestrator.stop_speaking.assert_awaited_once_with()

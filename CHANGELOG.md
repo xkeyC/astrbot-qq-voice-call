@@ -7,11 +7,6 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Changed
-
-- Replace raw-VAD TTS interruption with two-stage VAD candidate detection and
-  ASR-confirmed interruption commands or the current MaiBot nickname.
-
 ## [0.3.2] - 2026-08-03
 
 ### Added

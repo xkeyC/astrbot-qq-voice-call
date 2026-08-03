@@ -25,9 +25,12 @@ NapCat AV 桥处理，把人物身份、近期消息、记忆查询和模型路�
 
 ## 状态
 
-这是从一套麦麦 QQ 语音通话部署迁移出的 `0.2.0` 版本。插件骨架、SDK 上下文、
-实时 ASR、LLM、实时 TTS、VAD、插话打断和运行状态 API 已迁移；NapCat
-AV 桥仍作为外部组件部署。
+`0.3.0` 同时提供 MaiBot 插件和可安装的 QQ AV Bridge 源码。Bridge 以独立
+NapCat 插件加载，不修改 `napcat-plugin-builtin`；QQ Loader Hook 只用于启动
+第二个 AVSDK Host，安装时自动备份，卸载时恢复原文件。
+
+仓库仍不分发 QQ、NapCat 或 `libAVSDKPlugin.so`。Bridge 只加载用户自己的 QQ
+安装所附带的 AVSDK，因此 QQ/NapCat 升级后应先运行诊断并重新做一次来电测试。
 
 ## 挂断后的记忆回写
 
@@ -51,11 +54,12 @@ AV 桥仍作为外部组件部署。
 - `maibot-plugin-sdk` `2.5.4` 及以上、`3.0` 以下
 - Python 3.12+
 - Linux、PulseAudio/PipeWire Pulse 兼容层、`parec` 和 `pacat`
-- 一个实现 [`bridge/PROTOCOL.md`](bridge/PROTOCOL.md) 的本地 QQ AV 桥
+- NapCat `4.14.0` 及以上与 Linux QQ（需包含 `libAVSDKPlugin.so`）
+- PulseAudio、`pactl`、`parec`、`pacat`、`xvfb-run` 和 `curl`
 - DashScope 实时 ASR 与实时克隆 TTS 权限
 - MaiBot 模型管理中可用的电话回复模型
 
-## 安装
+## 安装 MaiBot 插件
 
 将仓库克隆到 MaiBot 的第三方插件目录：
 
@@ -69,8 +73,54 @@ git clone https://github.com/ClaudiaGardner/maibot-qq-voice-call.git
 ```bash
 export DASHSCOPE_API_KEY="..."
 export MAIBOT_QQ_CALL_VOICE_ID="..."
-export MAIBOT_QQ_CALL_BRIDGE_TOKEN="..."
 ```
+
+## 安装 QQ AV Bridge
+
+先安装并确认 Linux QQ 与 NapCat 能正常登录。然后在仓库根目录运行：
+
+```bash
+./bridge/scripts/install.sh \
+  --napcat-dir /path/to/QQ/resources/app/app_launcher/napcat \
+  --qq-dir /path/to/QQ \
+  --check
+
+./bridge/scripts/install.sh \
+  --napcat-dir /path/to/QQ/resources/app/app_launcher/napcat \
+  --qq-dir /path/to/QQ
+```
+
+安装器会完成以下操作：
+
+- 把 `napcat-plugin-maibot-qq-voice-call` 安装到 NapCat 的独立 `plugins/` 目录；
+- 在 `~/.local/share/maibot-qq-voice-call` 安装 AV Host 与运行脚本；
+- 创建权限为 `0600` 的 32 字节随机 Bridge Token；
+- 备份 QQ 原始 Loader，再安装带明确标记的最小可逆 Hook。
+
+安装完成后，把终端显示的 Token 文件路径填入 MaiBot 的
+`bridge.token_file`，再用桥接脚本启动机器人 QQ：
+
+```bash
+MAIBOT_QQ_CALL_BOT_UIN="机器人QQ号" \
+  ~/.local/share/maibot-qq-voice-call/scripts/run-napcat.sh
+```
+
+验证所有组件：
+
+```bash
+~/.local/share/maibot-qq-voice-call/scripts/doctor.sh
+```
+
+卸载默认保留运行目录与 Token，便于恢复；`--purge` 才会一并删除：
+
+```bash
+~/.local/share/maibot-qq-voice-call/scripts/uninstall.sh
+```
+
+现有服务、容器、自定义端口和升级兼容说明见
+[`bridge/README.md`](bridge/README.md)。
+
+## 配置
 
 启动 MaiBot 后，在 WebUI 插件配置中至少填写：
 
@@ -79,8 +129,10 @@ export MAIBOT_QQ_CALL_BRIDGE_TOKEN="..."
 - `chat.task_name = "utils"`（仓库默认值）
 - 在 MaiBot 模型管理中确认 `deepseek-v4-flash` 位于 `utils.model_list`
 - `memory.summary_task_name = "utils"`（默认复用同一轻量模型任务）
-- 正确的 PulseAudio capture/playback device
-- 正确的本地 AV 桥地址
+- `bridge.token_file`：安装器输出的 Token 文件路径
+- `audio.capture_device = "maibot_qq_speaker.monitor"`
+- `audio.playback_device = "maibot_qq_mic"`
+- `audio.pulse_server`：安装目录下的 `runtime/pulse/native` Unix socket
 
 Runner 会根据配置模型生成 `config.toml`。完整示例见
 [`examples/config.example.toml`](examples/config.example.toml)。
@@ -93,8 +145,10 @@ Runner 会根据配置模型生成 `config.toml`。完整示例见
 
 ## 安全
 
-AV 桥应只监听回环地址，并强制 Bearer Token。插件只从环境变量或显式
-Token 文件读取凭据。发布前请阅读 [`SECURITY.md`](SECURITY.md)。
+AV 桥强制只监听回环地址，并对状态与控制接口校验 Bearer Token。安装器不会
+读取或复制 QQ 登录态，也不会把 Token 写进 Git 仓库。Loader Hook 和 AVSDK
+属于 QQ/NapCat 版本敏感集成；升级后二次验证前不要直接切换生产账号。
+更多边界见 [`SECURITY.md`](SECURITY.md)。
 
 ## 开发
 
@@ -102,6 +156,8 @@ Token 文件读取凭据。发布前请阅读 [`SECURITY.md`](SECURITY.md)。
 uv sync --extra dev
 uv run pytest
 uv run ruff check .
+node --test bridge/tests/*.test.mjs
+bash -n bridge/scripts/*.sh
 ```
 
 架构和迁移说明分别见

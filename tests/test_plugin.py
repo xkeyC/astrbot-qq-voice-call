@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,22 @@ PLUGIN_MODULE = importlib.util.module_from_spec(PLUGIN_SPEC)
 PLUGIN_SPEC.loader.exec_module(PLUGIN_MODULE)
 GATEWAY_NAME = PLUGIN_MODULE.GATEWAY_NAME
 create_plugin = PLUGIN_MODULE.create_plugin
+
+
+def test_release_versions_stay_in_sync() -> None:
+    root = Path(__file__).parents[1]
+    manifest = json.loads((root / "_manifest.json").read_text(encoding="utf-8"))
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    bridge_package = json.loads(
+        (root / "bridge" / "napcat-plugin" / "package.json").read_text(encoding="utf-8")
+    )
+    package_version = (root / "maibot_qq_voice_call" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+    version = manifest["version"]
+    assert pyproject["project"]["version"] == version
+    assert bridge_package["version"] == version
+    assert f'__version__ = "{version}"' in package_version
 
 
 @pytest.mark.asyncio

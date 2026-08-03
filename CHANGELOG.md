@@ -7,6 +7,20 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-03
+
+### Added
+
+- Installable external NapCat AV bridge and separate QQ/Electron AVSDK host.
+- Reversible, version-sensitive QQ loader hook with exact backup restoration.
+- Isolated PulseAudio setup, launch scripts and authenticated diagnostics.
+- Node tests for the verified Accept mapping, redaction and loopback-only configuration.
+
+### Changed
+
+- Generic `maibot_qq_speaker` and `maibot_qq_mic` default audio devices.
+- Public metadata now uses the repository owner instead of deployment-specific naming.
+
 ## [0.2.0] - 2026-08-03
 
 ### Added
@@ -27,6 +41,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Adaptive VAD, incomplete-turn merging, barge-in and soft-limited gain.
 - Runtime status and private reply-test plugin APIs.
 
-[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/releases/tag/v0.1.0

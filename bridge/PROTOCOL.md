@@ -5,13 +5,17 @@
 
 ## 鉴权
 
-所有请求必须携带：
+除仅返回存活布尔值的 `GET /healthz` 外，所有请求必须携带：
 
 ```http
 Authorization: Bearer <random-token>
 ```
 
 Token 至少使用 32 字节随机值。服务不得监听公网地址。
+
+仓库实现额外使用两个仅供 Bridge 内部调用的鉴权端点：AV Host 的
+`POST /v1/invoke` 和 NapCat Bridge 的 `POST /v1/avsdk/output`。它们不是
+MaiBot 插件 API，且命令白名单仅包含登录、接听和 Kernel 数据转发。
 
 ## 当前通话
 
@@ -49,6 +53,8 @@ GET /v1/calls/current
 
 - 桥把对端声音输出到一个 PulseAudio sink；插件读取其 monitor source。
 - 插件把 TTS 播放到一个 PulseAudio sink；桥把该 sink 作为 QQ 麦克风输入。
+- 默认设备名分别为 `maibot_qq_speaker.monitor`、`maibot_qq_mic` 和
+  `maibot_qq_mic_source`。
 - ASR 输入格式为单声道 PCM S16LE 16 kHz。
 - 默认 TTS 输出格式为单声道 PCM S16LE 24 kHz。
 

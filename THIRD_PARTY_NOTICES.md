@@ -24,13 +24,16 @@ The SDK is a runtime dependency distributed separately under LGPL-3.0-only.
 
 ## NapCatQQ and QQ
 
-NapCatQQ has its own limited redistribution terms. This repository does not
-contain NapCat source or binaries. Users install and operate a compatible bridge
-separately and are responsible for the applicable licenses and platform terms.
+NapCatQQ has its own limited redistribution terms. This repository contains an
+original external plugin that runs against a user-installed NapCat instance; it
+does not contain NapCat source or binaries. Users are responsible for the
+applicable licenses and platform terms.
 
 <https://github.com/NapNeko/NapCatQQ>
 
-QQ is a Tencent service and is not affiliated with this project.
+QQ is a Tencent service and is not affiliated with this project. The AV Host
+loads `libAVSDKPlugin.so` from the user's own QQ installation; the library is not
+copied into releases or this repository.
 
 ## Cloud models
 

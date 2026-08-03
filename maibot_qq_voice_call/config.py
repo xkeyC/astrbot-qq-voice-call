@@ -10,7 +10,7 @@ class PluginSection(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="0.2.0", description="插件配置结构版本")
+    config_version: str = Field(default="0.3.0", description="插件配置结构版本")
     enabled: bool = Field(default=False, description="启用 QQ 语音通话插件")
     account_id: str = Field(default="", description="QQ 机器人账号，用于网关状态上报")
     scope: str = Field(default="primary", description="MaiBot 多账号路由作用域")
@@ -48,11 +48,11 @@ class AudioSection(PluginConfigBase):
         description="PulseAudio 服务地址；留空时继承进程环境",
     )
     capture_device: str = Field(
-        default="kaisy_speaker.monitor",
+        default="maibot_qq_speaker.monitor",
         description="接收 QQ 对端声音的 PulseAudio source",
     )
     playback_device: str = Field(
-        default="kaisy_mic",
+        default="maibot_qq_mic",
         description="向 QQ 麦克风播放 TTS 的 PulseAudio sink",
     )
     sample_rate: int = Field(default=16000, description="ASR 输入采样率")

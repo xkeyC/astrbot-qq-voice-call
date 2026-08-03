@@ -1,5 +1,5 @@
 [plugin]
-config_version = "0.2.0"
+config_version = "0.3.0"
 enabled = true
 account_id = "YOUR_BOT_QQ"
 scope = "primary"

@@ -10,7 +10,7 @@
 | WebUI WebSocket chat emulation | `ctx.llm.generate` |
 | Standalone health HTTP server | Public plugin status API |
 | Production plus local TTS experiments | API-only realtime ASR/TTS |
-| Kaisy-specific constants | Generic configurable plugin |
+| Deployment-specific constants | Generic configurable plugin |
 
 The original production repository remains unchanged while this migration is
 validated. It is not a source for the public Git history.
@@ -23,13 +23,17 @@ validated. It is not a source for the public Git history.
 - IndexTTS and GPT-SoVITS overlays, weights and benchmark outputs
 - NapCat or QQ binaries
 
-## Remaining work before public release
+## Public bridge migration
 
-1. Deploy beside the existing orchestrator and compare call latency.
-2. Cut over one test account, then remove the old DB/WebUI integration.
-3. Decide whether the AV bridge can be published separately under NapCat's
-   redistribution terms.
-4. Open a MaiBot RFC for a planner-free, tool-capable realtime turn API.
+Version 0.3.0 publishes the bridge source, reversible loader hook, audio setup,
+diagnostics and tests. It deliberately does not redistribute QQ, NapCat or the
+proprietary AVSDK library. The bridge is installed as an external NapCat plugin
+under `plugins/napcat-plugin-maibot-qq-voice-call`; it no longer modifies the
+built-in NapCat plugin.
+
+The QQ loader hook is still version-sensitive because a second Electron process
+must load the AVSDK shipped with the user's own QQ installation. Installation
+backs up the original loader and uninstallation restores it byte-for-byte.
 
 The manifest and plugin import have been validated against MaiBot `1.0.8` and
 `maibot-plugin-sdk` `2.5.4`, matching the current private deployment.

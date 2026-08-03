@@ -25,8 +25,8 @@ class RuntimeStatus:
     caller_context_ready: bool = False
     utterance_count: int = 0
     ignored_utterance_count: int = 0
+    dropped_utterance_count: int = 0
     queue_size: int = 0
-    pending_transcript: str = ""
     last_transcript: str = ""
     last_reply: str = ""
     last_asr_seconds: float = 0.0

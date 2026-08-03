@@ -202,11 +202,13 @@ class AudioSegmenter:
                         if output_queue.full():
                             with contextlib.suppress(asyncio.QueueEmpty):
                                 dropped = output_queue.get_nowait()
+                                self.status.dropped_utterance_count += 1
                                 if (
                                     dropped.realtime_transcript is not None
                                     and not dropped.realtime_transcript.done()
                                 ):
                                     dropped.realtime_transcript.cancel()
+                                self.logger.warning("通话语音队列已满，丢弃最早的待处理片段")
                         output_queue.put_nowait(
                             CallUtterance(
                                 wav_bytes=wav_bytes,

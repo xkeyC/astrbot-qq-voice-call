@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import re
-import time
 import unicodedata
-from collections.abc import Callable
 
 WAIT_TOKEN = "[WAIT]"
 CONTROL_MARKER = "[MAIBOT_QQ_CALL_CONTROL]"
@@ -56,41 +54,6 @@ def is_incomplete_transcript(text: str) -> bool:
             or (len(normalized) <= 20 and normalized.endswith(_INCOMPLETE_SUFFIXES))
         )
     )
-
-
-class TranscriptGate:
-    """Hold obviously incomplete turns and drop non-semantic ASR fragments."""
-
-    def __init__(
-        self,
-        pending_seconds: float,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self.pending_seconds = pending_seconds
-        self.clock = clock
-        self.pending_text = ""
-        self.pending_at = 0.0
-
-    def clear(self) -> None:
-        self.pending_text = ""
-        self.pending_at = 0.0
-
-    def process(self, transcript: str) -> str | None:
-        transcript = transcript.strip()
-        now = self.clock()
-        if is_filler_transcript(transcript):
-            return None
-
-        if self.pending_text and now - self.pending_at <= self.pending_seconds:
-            transcript = f"{self.pending_text}，{transcript}"
-        self.clear()
-
-        if is_incomplete_transcript(transcript):
-            self.pending_text = transcript
-            self.pending_at = now
-            return None
-        return transcript
 
 
 def clean_tts_text(text: str, *, max_chars: int = 24) -> str:

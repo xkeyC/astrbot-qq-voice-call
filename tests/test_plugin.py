@@ -53,10 +53,18 @@ def test_release_versions_stay_in_sync() -> None:
     package_version = (root / "maibot_qq_voice_call" / "__init__.py").read_text(
         encoding="utf-8"
     )
+    config_source = (root / "maibot_qq_voice_call" / "config.py").read_text(
+        encoding="utf-8"
+    )
+    bridge_source = (root / "bridge" / "napcat-plugin" / "index.mjs").read_text(
+        encoding="utf-8"
+    )
     version = manifest["version"]
     assert pyproject["project"]["version"] == version
     assert bridge_package["version"] == version
     assert f'__version__ = "{version}"' in package_version
+    assert f'default="{version}"' in config_source
+    assert f'version: "{version}"' in bridge_source
 
 
 @pytest.mark.asyncio

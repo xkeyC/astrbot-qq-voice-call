@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-03
+
+### Changed
+
+- Remove live hard-coded filler and incomplete-sentence gating; keep cleanup only
+  for post-call memory records and let the phone model use `[WAIT]` when needed.
+- Remove dead reply-generation state and duplicate TTS text cleanup.
+- Align phone reply limits at 128 tokens and 80 spoken characters.
+- Track full audible TTS completion before committing a reply to call history,
+  and expose dropped queued utterances instead of silently replacing them.
+
 ## [0.3.2] - 2026-08-03
 
 ### Added
@@ -68,7 +79,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Adaptive VAD, incomplete-turn merging, barge-in and soft-limited gain.
 - Runtime status and private reply-test plugin APIs.
 
-[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.2.0...v0.3.0

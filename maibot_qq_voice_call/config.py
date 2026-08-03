@@ -10,7 +10,7 @@ class PluginSection(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="0.3.2", description="插件配置结构版本")
+    config_version: str = Field(default="0.3.3", description="插件配置结构版本")
     enabled: bool = Field(default=False, description="启用 QQ 语音通话插件")
     account_id: str = Field(default="", description="QQ 机器人账号，用于网关状态上报")
     scope: str = Field(default="primary", description="MaiBot 多账号路由作用域")
@@ -97,14 +97,13 @@ class ChatSection(PluginConfigBase):
         ),
     )
     temperature: float = Field(default=0.2, description="通话回复温度")
-    max_tokens: int = Field(default=512, description="通话回复最大 Token 数")
-    max_reply_chars: int = Field(default=32, description="TTS 前的最大回复字数")
+    max_tokens: int = Field(default=128, description="通话回复最大 Token 数")
+    max_reply_chars: int = Field(default=80, description="TTS 前的最大回复字数")
     history_messages: int = Field(default=8, description="通话内保留的历史消息数")
     context_recent_messages: int = Field(default=4, description="读取的近期 QQ 消息数")
     context_message_chars: int = Field(default=120, description="每条近期消息最大长度")
     context_memory_chars: int = Field(default=1000, description="人物记忆最大长度")
     context_prompt_chars: int = Field(default=2400, description="来电者上下文最大长度")
-    pending_transcript_seconds: float = Field(default=4.0, description="未说完文本等待时长")
     greeting: str = Field(default="喂，你好呀。现在可以直接和我说话啦。", description="接通问候语")
     system_prompt: str = Field(
         default=(

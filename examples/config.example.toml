@@ -1,5 +1,5 @@
 [plugin]
-config_version = "0.3.0"
+config_version = "0.3.3"
 enabled = true
 account_id = "YOUR_BOT_QQ"
 scope = "primary"
@@ -33,14 +33,13 @@ final_timeout_seconds = 1.5
 [chat]
 task_name = "utils"
 temperature = 0.2
-max_tokens = 512
-max_reply_chars = 32
+max_tokens = 128
+max_reply_chars = 80
 history_messages = 8
 context_recent_messages = 4
 context_message_chars = 120
 context_memory_chars = 1000
 context_prompt_chars = 2400
-pending_transcript_seconds = 4.0
 greeting = "喂，你好呀。现在可以直接和我说话啦。"
 system_prompt = """
 你正在进行一通 QQ 语音电话。请像真人打电话一样自然、简短地回应，

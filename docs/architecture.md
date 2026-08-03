@@ -55,6 +55,9 @@ WebUI Token。
 - 实时 ASR 和 TTS 直接复用预热 WebSocket，降低首包时间。
 - LLM 通过 MaiBot `ctx.llm` 路由，不在插件中保存供应商 Key。
 - DashScope Key 和音色 ID 只从运行环境读取。
+- 当前 Qwen3-TTS Realtime 原始协议没有记录可取消已开始 `response` 的同会话事件；
+  `input_text_buffer.clear` 只清理未提交文本。因此插话会关闭播放连接并立即后台预热，
+  不套用仅适用于 Qwen-Audio-TTS/CosyVoice 的 `finish-task directive=cancel`。
 
 ## Turn lifecycle
 
@@ -62,7 +65,7 @@ WebUI Token。
 2. 插件解析 caller、person、stream、记忆和近期消息。
 3. VAD 检测语音并实时追加 ASR 音频。
 4. 句尾静音达到阈值后提交 ASR。
-5. 无意义文本被丢弃；明显未说完的片段最多等待数秒合并。
+5. 非空 ASR 文本直接进入电话回复模型；模型可用 `[WAIT]` 放弃不可靠输入。
 6. `ctx.llm.generate` 生成短回复。
 7. TTS 首包立即写入 QQ 麦克风。
 8. 对方持续说话时终止当前 TTS，并预热下一条 TTS 会话。
@@ -70,7 +73,7 @@ WebUI Token。
 ## Hangup memory lifecycle
 
 1. 每个已接通来电按 `inviteAt` 建立独立的内存轮次缓冲，只记录通过二次过滤且
-   TTS 已产生首包的完整问答对。
+   TTS 已完整播放的问答对；插话中断的回复不进入电话历史或记忆。
 2. 挂断时立即冻结快照并清空通话状态，后台任务再调用 `ctx.llm.generate` 生成摘要。
 3. 人物事实必须携带可在“对方”原话中逐字验证的证据，否则丢弃。
 4. `ctx.gateway.route_message` 注入以 `[QQ语音通话记录]` 开头的合成私聊消息。

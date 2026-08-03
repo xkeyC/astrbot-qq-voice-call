@@ -15,7 +15,7 @@ from maibot_qq_voice_call.memory import (
     _parse_summary_payload,
     sanitize_call_turns,
 )
-from maibot_qq_voice_call.models import CallerContext
+from maibot_qq_voice_call.models import CallerContext, CallUtterance
 from maibot_qq_voice_call.orchestrator import CallOrchestrator
 from maibot_qq_voice_call.text import CONTROL_MARKER, WAIT_TOKEN
 
@@ -209,7 +209,7 @@ async def test_orchestrator_collects_spoken_turn_and_writes_it_after_hangup() ->
         return MemoryWriteResult(success=True, turn_count=len(archive.turns))
 
     orchestrator.memory_writer = SimpleNamespace(write=write)
-    orchestrator._finish_call()
+    await orchestrator._finish_call()
     tasks = tuple(orchestrator.memory_tasks)
     await asyncio.gather(*tasks)
 
@@ -240,11 +240,28 @@ async def test_hangup_cancels_in_flight_reply_without_stopping_turn_worker() -> 
 
     handling = asyncio.create_task(orchestrator._handle_transcript("hello"))
     await started.wait()
-    orchestrator._finish_call()
+    await orchestrator._finish_call()
     await handling
 
     orchestrator.speak.assert_not_awaited()
     assert orchestrator.pending_chat_task is None
+
+
+@pytest.mark.asyncio
+async def test_hangup_stops_tts_before_finishing_call() -> None:
+    orchestrator = CallOrchestrator(
+        SimpleNamespace(),
+        QQVoiceCallConfig(),
+        logging.getLogger(__name__),
+    )
+    orchestrator.config.memory.enabled = False
+    orchestrator.call_archive_invite = "invite-playing"
+    orchestrator.tts = SimpleNamespace(stop=AsyncMock(return_value=True))
+
+    await orchestrator._finish_call()
+
+    orchestrator.tts.stop.assert_awaited_once_with()
+    assert orchestrator.call_archive_invite == ""
 
 
 @pytest.mark.asyncio
@@ -261,7 +278,6 @@ async def test_new_speech_only_stops_old_tts_without_cancelling_pending_reply() 
 
     await orchestrator._on_speech_started()
 
-    assert orchestrator.speech_generation == 0
     assert not pending.cancelling()
     orchestrator.chat.invalidate.assert_not_called()
     orchestrator.stop_speaking.assert_awaited_once_with()
@@ -283,3 +299,43 @@ async def test_completed_transcript_does_not_repeat_barge_in() -> None:
     await orchestrator._handle_transcript("a complete meaningful transcript")
 
     orchestrator.stop_speaking.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_live_transcript_does_not_apply_memory_cleanup_rules() -> None:
+    orchestrator = CallOrchestrator(
+        SimpleNamespace(),
+        QQVoiceCallConfig(),
+        logging.getLogger(__name__),
+    )
+    orchestrator.active_call.set()
+    orchestrator.call_archive_invite = "invite-active"
+    orchestrator.chat.ask = AsyncMock(return_value=WAIT_TOKEN)
+
+    await orchestrator._handle_transcript("然后")
+    await orchestrator._handle_transcript("好的")
+    await orchestrator._handle_transcript("。")
+
+    assert orchestrator.chat.ask.await_args_list[0].args == ("然后",)
+    assert orchestrator.chat.ask.await_args_list[1].args == ("好的",)
+    assert orchestrator.chat.ask.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_call_reset_clears_buffered_utterances() -> None:
+    orchestrator = CallOrchestrator(
+        SimpleNamespace(),
+        QQVoiceCallConfig(),
+        logging.getLogger(__name__),
+    )
+    transcript = asyncio.get_running_loop().create_future()
+    orchestrator.utterance_queue.put_nowait(
+        CallUtterance(wav_bytes=b"wav", realtime_transcript=transcript)
+    )
+
+    orchestrator._reset_call_state()
+
+    assert orchestrator.utterance_queue.maxsize == 3
+    assert orchestrator.utterance_queue.empty()
+    assert transcript.cancelled()
+    assert orchestrator.status.queue_size == 0

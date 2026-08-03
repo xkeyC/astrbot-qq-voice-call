@@ -11,6 +11,7 @@ import math
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import ClientSession, ClientWSTimeout, WSMsgType
@@ -21,7 +22,15 @@ from .asr_dashscope import _model_url
 
 
 class TTSPlaybackInterrupted(Exception):
-    """Raised when barge-in interrupts a TTS turn before its first audio packet."""
+    """Raised when barge-in interrupts a TTS turn before playback completes."""
+
+
+@dataclass(slots=True)
+class TTSPlaybackHandle:
+    """First-packet latency plus a future that resolves after audible playback."""
+
+    first_audio_seconds: float
+    completion: asyncio.Future[None]
 
 
 class DashScopeRealtimeTTS:
@@ -56,6 +65,7 @@ class DashScopeRealtimeTTS:
         self.warm_task: asyncio.Task[None] | None = None
         self.ready_future: asyncio.Future[None] | None = None
         self.first_audio_future: asyncio.Future[float] | None = None
+        self.playback_future: asyncio.Future[None] | None = None
         self.response_active = False
         self.response_started_at = 0.0
         self.playback_until = 0.0
@@ -108,6 +118,13 @@ class DashScopeRealtimeTTS:
                 exc_info=(type(exception), exception, exception.__traceback__),
             )
 
+    @staticmethod
+    def _consume_future_result(future: asyncio.Future[None]) -> None:
+        if future.cancelled():
+            return
+        with contextlib.suppress(Exception):
+            future.exception()
+
     async def _spawn_playback_process(self) -> asyncio.subprocess.Process:
         process_env = os.environ.copy()
         if self.audio.pulse_server:
@@ -154,11 +171,13 @@ class DashScopeRealtimeTTS:
             websocket = self.websocket
             ready_future = self.ready_future
             first_audio_future = self.first_audio_future
+            playback_future = self.playback_future
             self.receiver_task = None
             self.playback_process = None
             self.websocket = None
             self.ready_future = None
             self.first_audio_future = None
+            self.playback_future = None
             self.response_active = False
             self.response_started_at = 0.0
             self.playback_until = 0.0
@@ -170,6 +189,13 @@ class DashScopeRealtimeTTS:
                 first_audio_future.set_exception(TTSPlaybackInterrupted())
             else:
                 first_audio_future.cancel()
+        if playback_future is not None and not playback_future.done():
+            if interrupted:
+                playback_future.set_exception(TTSPlaybackInterrupted())
+            else:
+                playback_future.set_exception(
+                    RuntimeError("DashScope 实时 TTS 播放未完成，连接已关闭")
+                )
         if websocket is not None and not websocket.closed:
             with contextlib.suppress(Exception):
                 await websocket.close()
@@ -178,6 +204,35 @@ class DashScopeRealtimeTTS:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await self._terminate_process(process)
+
+    async def _complete_playback(
+        self,
+        generation: int,
+        playback_future: asyncio.Future[None],
+    ) -> None:
+        while not playback_future.done():
+            async with self.state_lock:
+                if (
+                    generation != self.generation
+                    or self.playback_future is not playback_future
+                ):
+                    return
+                playback_grace = max(0.03, self.config.playback_latency_ms / 1000)
+                remaining = self.playback_until + playback_grace - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+                continue
+            async with self.state_lock:
+                if (
+                    generation == self.generation
+                    and self.playback_future is playback_future
+                ):
+                    self.playback_future = None
+                    self.first_audio_future = None
+                    self.response_started_at = 0.0
+                    if not playback_future.done():
+                        playback_future.set_result(None)
+            return
 
     async def _receive_events(
         self,
@@ -235,11 +290,17 @@ class DashScopeRealtimeTTS:
                     elif event_type == "response.done":
                         async with self.state_lock:
                             first_audio = self.first_audio_future
+                            playback_future = self.playback_future
                             self.response_active = False
                         if first_audio is not None and not first_audio.done():
                             first_audio.set_exception(
                                 RuntimeError("DashScope 实时 TTS 未返回音频")
                             )
+                        elif playback_future is not None and not playback_future.done():
+                            task = asyncio.create_task(
+                                self._complete_playback(generation, playback_future)
+                            )
+                            task.add_done_callback(self._consume_task_result)
                     elif event_type == "session.finished":
                         break
                     elif event_type == "error":
@@ -264,10 +325,13 @@ class DashScopeRealtimeTTS:
             async with self.state_lock:
                 ready_future = self.ready_future
                 first_audio = self.first_audio_future
+                playback_future = self.playback_future
             if ready_future is not None and not ready_future.done():
                 ready_future.set_exception(exc)
             if first_audio is not None and not first_audio.done():
                 first_audio.set_exception(exc)
+            if playback_future is not None and not playback_future.done():
+                playback_future.set_exception(exc)
             raise
         finally:
             should_rewarm = False
@@ -356,7 +420,9 @@ class DashScopeRealtimeTTS:
     async def stop(self) -> bool:
         async with self.state_lock:
             was_playing = bool(
-                self.response_active or time.monotonic() < self.playback_until + 0.03
+                self.response_active
+                or time.monotonic()
+                < self.playback_until + max(0.03, self.config.playback_latency_ms / 1000)
             )
         if not was_playing:
             return False
@@ -368,20 +434,29 @@ class DashScopeRealtimeTTS:
             self.warm_task = warm_task
         return True
 
-    async def start(self, text: str) -> float:
+    async def start(self, text: str) -> TTSPlaybackHandle:
         async with self.turn_lock:
             async with self.state_lock:
-                active = self.response_active
-            if active:
+                playing = bool(
+                    self.response_active
+                    or self.playback_future is not None
+                    or time.monotonic()
+                    < self.playback_until
+                    + max(0.03, self.config.playback_latency_ms / 1000)
+                )
+            if playing:
                 await self.stop()
             started_at = time.perf_counter()
             await self._ensure_connected()
             first_audio = asyncio.get_running_loop().create_future()
+            playback_future = asyncio.get_running_loop().create_future()
+            playback_future.add_done_callback(self._consume_future_result)
             async with self.state_lock:
                 websocket = self.websocket
                 if websocket is None or websocket.closed:
                     raise RuntimeError("DashScope 实时 TTS WebSocket 尚未就绪")
                 self.first_audio_future = first_audio
+                self.playback_future = playback_future
                 self.response_active = True
                 self.response_started_at = started_at
                 self.playback_until = time.monotonic()
@@ -390,10 +465,23 @@ class DashScopeRealtimeTTS:
                     self.event("input_text_buffer.append", text=text)
                 )
                 await websocket.send_json(self.event("input_text_buffer.commit"))
-                return await asyncio.wait_for(asyncio.shield(first_audio), timeout=15)
+                first_audio_seconds = await asyncio.wait_for(
+                    asyncio.shield(first_audio),
+                    timeout=15,
+                )
+                return TTSPlaybackHandle(
+                    first_audio_seconds=first_audio_seconds,
+                    completion=playback_future,
+                )
             except BaseException:
                 async with self.connection_lock:
-                    await self._disconnect_locked()
+                    async with self.state_lock:
+                        owns_failed_turn = bool(
+                            self.first_audio_future is first_audio
+                            or self.playback_future is playback_future
+                        )
+                    if owns_failed_turn:
+                        await self._disconnect_locked()
                 raise
 
     async def close(self) -> None:

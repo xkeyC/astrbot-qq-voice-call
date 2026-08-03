@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "github.claudiagardner.maibot-qq-voice-call",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "name": "MaiBot QQ Voice Call",
   "description": "Low-latency QQ voice calls through an external NapCat AV bridge.",
   "author": {

@@ -81,3 +81,36 @@ async def test_chat_discards_reply_after_call_context_is_invalidated() -> None:
     release.set()
 
     assert await task == WAIT_TOKEN
+
+
+@pytest.mark.asyncio
+async def test_contextual_greeting_uses_prior_context_without_fake_user_history() -> None:
+    llm = FakeLLM()
+    chat = MaiBotPhoneChat(SimpleNamespace(llm=llm), ChatSection(max_tokens=128))
+    chat.reset(
+        CallerContext(
+            uin="123456",
+            name="测试来电者",
+            prompt_context="近期对话：测试来电者准备明天去上海。",
+            recent_message_count=1,
+        )
+    )
+
+    greeting = await chat.generate_greeting()
+
+    assert greeting == "可以，我们继续。"
+    assert llm.request["model"] == "utils"
+    assert llm.request["max_tokens"] == 64
+    assert "准备明天去上海" in llm.request["prompt"][0]["content"]
+    assert "电话刚刚接通" in llm.request["prompt"][0]["content"]
+    assert llm.request["prompt"][-1] == {
+        "role": "user",
+        "content": "电话已接通，请说开场白。",
+    }
+
+    chat.commit_greeting(greeting)
+    await chat.ask("是啊")
+    assert llm.request["prompt"][-2:] == [
+        {"role": "assistant", "content": greeting},
+        {"role": "user", "content": "是啊"},
+    ]

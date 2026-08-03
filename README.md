@@ -25,9 +25,13 @@ NapCat AV 桥处理，把人物身份、近期消息、记忆查询和模型路�
 
 ## 状态
 
-`0.3.3` 同时提供 MaiBot 插件和可安装的 QQ AV Bridge 源码。Bridge 以独立
+`0.3.4` 同时提供 MaiBot 插件和可安装的 QQ AV Bridge 源码。Bridge 以独立
 NapCat 插件加载，不修改 `napcat-plugin-builtin`；QQ Loader Hook 只用于启动
 第二个 AVSDK Host，安装时自动备份，卸载时恢复原文件。
+
+接通时若来电者已有近期 QQ 对话或人物记忆，麦麦会先用电话回复模型生成一句
+自然的上下文开场白；没有可用上下文、模型超时或失败时使用固定问候。若来电者
+已经开始说话，插件会取消或跳过开场生成，不阻塞第一轮正常对话。
 
 仓库仍不分发 QQ、NapCat 或 `libAVSDKPlugin.so`。Bridge 只加载用户自己的 QQ
 安装所附带的 AVSDK，因此 QQ/NapCat 升级后应先运行诊断并重新做一次来电测试。
@@ -129,6 +133,8 @@ MAIBOT_QQ_CALL_BOT_UIN="机器人QQ号" \
 - `plugin.account_id`：机器人 QQ 号
 - `chat.task_name = "utils"`（仓库默认值）
 - 在 MaiBot 模型管理中确认 `deepseek-v4-flash` 位于 `utils.model_list`
+- `chat.contextual_greeting_enabled = true`：有历史上下文时生成开场白
+- `chat.greeting_timeout_seconds = 2.5`：超时后立即使用固定问候
 - `memory.summary_task_name = "utils"`（默认复用同一轻量模型任务）
 - `bridge.token_file`：安装器输出的 Token 文件路径
 - `audio.capture_device = "maibot_qq_speaker.monitor"`

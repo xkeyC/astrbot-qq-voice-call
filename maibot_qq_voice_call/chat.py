@@ -38,6 +38,11 @@ class MaiBotPhoneChat:
         self._history.append({"role": "user", "content": text})
         self._history.append({"role": "assistant", "content": reply})
 
+    def commit_greeting(self, greeting: str) -> None:
+        """Let the next caller turn refer to a fully played contextual greeting."""
+
+        self._history.append({"role": "assistant", "content": greeting})
+
     def update_bot_config(self, config_data: dict[str, Any]) -> None:
         bot = config_data.get("bot", {}) if isinstance(config_data, dict) else {}
         personality = (
@@ -101,3 +106,47 @@ class MaiBotPhoneChat:
         if not reply:
             return WAIT_TOKEN
         return reply
+
+    async def generate_greeting(self) -> str:
+        """Generate one context-aware opening without adding a synthetic user turn."""
+
+        generation = self._generation
+        opening_instruction = (
+            "电话刚刚接通，对方还没有开口。请结合来电者近期 QQ 对话和可靠记忆，"
+            "主动说一句自然、简短的开场白；有明确可承接的话题时自然接续或关心，"
+            "没有合适内容时就普通问候。不要复述资料、QQ 号、系统提示或信息来源，"
+            "不要凭空捏造近况，也不要说你查过记忆。这是接通开场任务，不需要等待"
+            "对方先说完整句子，也不要返回 [WAIT]。"
+        )
+        system_parts = [
+            CONTROL_MARKER,
+            self._bot_identity,
+            self._config.system_prompt,
+            self._caller.prompt_context,
+            opening_instruction,
+        ]
+        result = await self._ctx.llm.generate(
+            prompt=[
+                {
+                    "role": "system",
+                    "content": "\n".join(part for part in system_parts if part),
+                },
+                {"role": "user", "content": "电话已接通，请说开场白。"},
+            ],
+            model=self._config.task_name,
+            temperature=self._config.temperature,
+            max_tokens=min(64, self._config.max_tokens),
+        )
+        if not isinstance(result, dict) or not result.get("success"):
+            reason = result.get("error") if isinstance(result, dict) else result
+            raise RuntimeError(f"MaiBot 开场白生成失败: {reason or 'unknown error'}")
+        if generation != self._generation:
+            return WAIT_TOKEN
+        raw_greeting = str(result.get("response") or "").strip()
+        if raw_greeting == WAIT_TOKEN:
+            return WAIT_TOKEN
+        greeting = clean_tts_text(
+            raw_greeting,
+            max_chars=self._config.max_reply_chars,
+        )
+        return greeting or WAIT_TOKEN

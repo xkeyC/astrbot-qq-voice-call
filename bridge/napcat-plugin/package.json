@@ -1,7 +1,7 @@
 {
   "name": "napcat-plugin-maibot-qq-voice-call",
   "plugin": "MaiBot QQ 实时语音桥",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "type": "module",
   "main": "index.mjs",
   "description": "Loopback-only QQ AVSDK bridge for MaiBot voice calls",

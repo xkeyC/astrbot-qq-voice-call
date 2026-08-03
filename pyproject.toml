@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maibot-qq-voice-call"
-version = "0.3.3"
+version = "0.3.4"
 description = "MaiBot plugin for low-latency QQ voice calls"
 readme = "README.md"
 requires-python = ">=3.12"

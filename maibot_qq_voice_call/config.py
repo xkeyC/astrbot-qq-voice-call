@@ -10,7 +10,7 @@ class PluginSection(PluginConfigBase):
     __ui_icon__ = "settings"
     __ui_order__ = 0
 
-    config_version: str = Field(default="0.3.3", description="插件配置结构版本")
+    config_version: str = Field(default="0.3.4", description="插件配置结构版本")
     enabled: bool = Field(default=False, description="启用 QQ 语音通话插件")
     account_id: str = Field(default="", description="QQ 机器人账号，用于网关状态上报")
     scope: str = Field(default="primary", description="MaiBot 多账号路由作用域")
@@ -104,7 +104,18 @@ class ChatSection(PluginConfigBase):
     context_message_chars: int = Field(default=120, description="每条近期消息最大长度")
     context_memory_chars: int = Field(default=1000, description="人物记忆最大长度")
     context_prompt_chars: int = Field(default=2400, description="来电者上下文最大长度")
-    greeting: str = Field(default="喂，你好呀。现在可以直接和我说话啦。", description="接通问候语")
+    contextual_greeting_enabled: bool = Field(
+        default=True,
+        description="有近期消息或人物记忆时，由通话模型生成上下文开场白",
+    )
+    greeting_timeout_seconds: float = Field(
+        default=2.5,
+        description="上下文开场白生成超时；超时后使用固定问候语",
+    )
+    greeting: str = Field(
+        default="喂，你好呀。现在可以直接和我说话啦。",
+        description="无上下文、生成失败或超时时使用的接通问候语",
+    )
     system_prompt: str = Field(
         default=(
             "你正在进行一通 QQ 语音电话。请像真人打电话一样自然、简短地回应，"

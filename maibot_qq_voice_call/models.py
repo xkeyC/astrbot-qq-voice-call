@@ -32,6 +32,8 @@ class RuntimeStatus:
     last_asr_seconds: float = 0.0
     last_chat_seconds: float = 0.0
     last_tts_seconds: float = 0.0
+    last_greeting_seconds: float = 0.0
+    last_greeting_contextual: bool = False
     current_call_turn_count: int = 0
     last_memory_write_success: bool | None = None
     last_memory_write_seconds: float = 0.0

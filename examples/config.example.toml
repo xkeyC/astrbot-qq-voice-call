@@ -1,5 +1,5 @@
 [plugin]
-config_version = "0.3.3"
+config_version = "0.3.4"
 enabled = true
 account_id = "YOUR_BOT_QQ"
 scope = "primary"
@@ -40,6 +40,8 @@ context_recent_messages = 4
 context_message_chars = 120
 context_memory_chars = 1000
 context_prompt_chars = 2400
+contextual_greeting_enabled = true
+greeting_timeout_seconds = 2.5
 greeting = "喂，你好呀。现在可以直接和我说话啦。"
 system_prompt = """
 你正在进行一通 QQ 语音电话。请像真人打电话一样自然、简短地回应，

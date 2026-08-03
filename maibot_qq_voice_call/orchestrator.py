@@ -57,6 +57,7 @@ class CallOrchestrator:
         self.utterance_queue: asyncio.Queue[CallUtterance] = asyncio.Queue(maxsize=3)
         self.response_lock = asyncio.Lock()
         self.pending_chat_task: asyncio.Task[str] | None = None
+        self.pending_greeting_task: asyncio.Task[str] | None = None
         self.close_lock = asyncio.Lock()
         self.closed = False
         self.context_active_invite = ""
@@ -244,6 +245,10 @@ class CallOrchestrator:
         cancels pending model work so a late reply cannot cross call boundaries.
         """
 
+        greeting_task = self.pending_greeting_task
+        if greeting_task is not None and not greeting_task.done():
+            greeting_task.cancel()
+            self.logger.info("来电者已开始说话，跳过上下文开场白")
         await self.stop_speaking()
 
     async def _handle_transcript(self, transcript: str) -> None:
@@ -356,8 +361,67 @@ class CallOrchestrator:
         async with self.response_lock:
             if not self.active_call.is_set() or self.status.invite_at != invite_at:
                 return
+            greeting = self.config.chat.greeting
+            contextual = False
+            started_at = time.perf_counter()
             try:
-                await self.speak(self.config.chat.greeting)
+                has_prior_context = bool(
+                    self.caller_context.memory_point_count
+                    or self.caller_context.recent_message_count
+                )
+                if self.config.chat.contextual_greeting_enabled and has_prior_context:
+                    greeting_task = asyncio.create_task(
+                        self.chat.generate_greeting(),
+                        name=f"qq-call-greeting-{invite_at}",
+                    )
+                    self.pending_greeting_task = greeting_task
+                    parent_task = asyncio.current_task()
+                    try:
+                        generated = await asyncio.wait_for(
+                            greeting_task,
+                            timeout=max(
+                                0.1,
+                                self.config.chat.greeting_timeout_seconds,
+                            ),
+                        )
+                    except TimeoutError:
+                        self.logger.warning("上下文开场白生成超时，使用固定问候语")
+                    except asyncio.CancelledError:
+                        if parent_task is not None and parent_task.cancelling():
+                            raise
+                        return
+                    except Exception as exc:
+                        self.logger.warning("上下文开场白生成失败，使用固定问候语: %s", exc)
+                    else:
+                        if generated != WAIT_TOKEN:
+                            greeting = generated
+                            contextual = True
+                    finally:
+                        if self.pending_greeting_task is greeting_task:
+                            self.pending_greeting_task = None
+
+                self.status.last_greeting_seconds = round(
+                    time.perf_counter() - started_at,
+                    3,
+                )
+                self.status.last_greeting_contextual = False
+                if (
+                    not self.active_call.is_set()
+                    or self.status.invite_at != invite_at
+                    or self.status.recording
+                    or not self.utterance_queue.empty()
+                ):
+                    self.logger.info("来电者已先说话或通话已切换，取消播放开场白")
+                    return
+                spoken = await self.speak(greeting)
+                if (
+                    spoken
+                    and contextual
+                    and self.active_call.is_set()
+                    and self.status.invite_at == invite_at
+                ):
+                    self.chat.commit_greeting(greeting)
+                    self.status.last_greeting_contextual = True
             except Exception as exc:
                 self.status.last_error = str(exc)
                 self.logger.exception("播放通话问候语失败")
@@ -397,6 +461,8 @@ class CallOrchestrator:
         self.status.caller_person_id = ""
         self.status.caller_stream_id = ""
         self.status.caller_context_ready = False
+        self.status.last_greeting_seconds = 0.0
+        self.status.last_greeting_contextual = False
 
     async def _finish_call(self) -> None:
         if not self.call_archive_invite:
@@ -404,6 +470,11 @@ class CallOrchestrator:
         self.chat.invalidate()
         if self.pending_chat_task is not None and not self.pending_chat_task.done():
             self.pending_chat_task.cancel()
+        if (
+            self.pending_greeting_task is not None
+            and not self.pending_greeting_task.done()
+        ):
+            self.pending_greeting_task.cancel()
         if self.tts is not None and not self.closed:
             await self._stop_after_hangup()
         archive = CallArchive(

@@ -121,7 +121,7 @@ class DashScopeRealtimeTTS:
             "--channels=1",
             f"--device={self.audio.playback_device}",
             "--client-name=maibot-qq-call-tts",
-            "--latency-msec=20",
+            f"--latency-msec={max(20, self.config.playback_latency_ms)}",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,

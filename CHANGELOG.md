@@ -7,6 +7,25 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-03
+
+### Added
+
+- Load MaiBot's current nickname, personality and reply style for phone identity.
+- Add a configurable PulseAudio playback jitter buffer and regression tests.
+
+### Changed
+
+- Raise reply token and text limits for reasoning-capable fast models.
+- Tighten filler, incomplete-sentence and prompt-leak filtering.
+
+### Fixed
+
+- Cancel and discard stale model replies when the caller starts a new speech turn.
+- Keep unplayed replies out of phone history and post-call memory.
+- Parse serialized recent-message dictionaries returned by MaiBot 1.0.x correctly.
+- Invalidate in-flight replies when calls end or a new invitation replaces them.
+
 ## [0.3.1] - 2026-08-03
 
 ### Fixed
@@ -49,7 +68,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Adaptive VAD, incomplete-turn merging, barge-in and soft-limited gain.
 - Runtime status and private reply-test plugin APIs.
 
-[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ClaudiaGardner/maibot-qq-voice-call/compare/v0.1.0...v0.2.0

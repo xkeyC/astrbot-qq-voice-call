@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -188,7 +188,11 @@ async def test_orchestrator_collects_spoken_turn_and_writes_it_after_hangup() ->
         QQVoiceCallConfig(),
         logging.getLogger(__name__),
     )
-    orchestrator.chat = SimpleNamespace(ask=AsyncMock(return_value="好的。"))
+    orchestrator.chat = SimpleNamespace(
+        ask=AsyncMock(return_value="好的。"),
+        invalidate=Mock(),
+        commit_turn=Mock(),
+    )
     orchestrator.speak = AsyncMock(return_value=True)
     orchestrator.active_call.set()
     orchestrator.call_archive_invite = "invite-1"
@@ -213,3 +217,51 @@ async def test_orchestrator_collects_spoken_turn_and_writes_it_after_hangup() ->
     assert written[0].caller.uin == "123456"
     assert written[0].turns[0].caller_text == "我明天去上海"
     assert orchestrator.status.last_memory_write_success is True
+
+
+@pytest.mark.asyncio
+async def test_hangup_cancels_in_flight_reply_without_stopping_turn_worker() -> None:
+    orchestrator = CallOrchestrator(
+        SimpleNamespace(),
+        QQVoiceCallConfig(),
+        logging.getLogger(__name__),
+    )
+    started = asyncio.Event()
+
+    async def delayed_reply(_text):
+        started.set()
+        await asyncio.Future()
+
+    orchestrator.chat.ask = delayed_reply
+    orchestrator.speak = AsyncMock(return_value=True)
+    orchestrator.config.memory.enabled = False
+    orchestrator.active_call.set()
+    orchestrator.call_archive_invite = "invite-stale"
+
+    handling = asyncio.create_task(orchestrator._handle_transcript("hello"))
+    await started.wait()
+    orchestrator._finish_call()
+    await handling
+
+    orchestrator.speak.assert_not_awaited()
+    assert orchestrator.pending_chat_task is None
+
+
+@pytest.mark.asyncio
+async def test_new_speech_cancels_pending_reply_and_stops_old_tts() -> None:
+    orchestrator = CallOrchestrator(
+        SimpleNamespace(),
+        QQVoiceCallConfig(),
+        logging.getLogger(__name__),
+    )
+    pending = asyncio.create_task(asyncio.sleep(60))
+    orchestrator.pending_chat_task = pending
+    orchestrator.chat.invalidate = Mock()
+    orchestrator.stop_speaking = AsyncMock(return_value=True)
+
+    await orchestrator._on_speech_started()
+
+    assert orchestrator.speech_generation == 1
+    assert pending.cancelling()
+    orchestrator.chat.invalidate.assert_called_once_with()
+    orchestrator.stop_speaking.assert_awaited_once_with()

@@ -82,6 +82,32 @@ class QQVoiceCallPlugin(MaiBotPlugin):
         if self._runtime_task is not None and not self._runtime_task.done():
             return
         runtime = CallOrchestrator(self.ctx, self.config, self.ctx.logger)
+        config_capability = getattr(self.ctx, "config", None)
+        if config_capability is not None:
+            try:
+                bot_result = await config_capability.get("bot", {})
+                personality_result = await config_capability.get("personality", {})
+
+                def unwrap(result: Any, scope: str) -> dict[str, Any]:
+                    if isinstance(result, dict) and "success" in result:
+                        result = result.get("value", {}) if result.get("success") else {}
+                    if not isinstance(result, dict):
+                        return {}
+                    for container in ("value", "config", "data"):
+                        nested = result.get(container)
+                        if isinstance(nested, dict):
+                            result = nested
+                    scoped = result.get(scope)
+                    return scoped if isinstance(scoped, dict) else result
+
+                runtime.chat.update_bot_config(
+                    {
+                        "bot": unwrap(bot_result, "bot"),
+                        "personality": unwrap(personality_result, "personality"),
+                    }
+                )
+            except Exception as exc:
+                self.ctx.logger.warning("读取 MaiBot 身份配置失败: %s", exc)
         self._runtime = runtime
         task = asyncio.create_task(
             runtime.run(ready_callback=self._update_gateway_state),

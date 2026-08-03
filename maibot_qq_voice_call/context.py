@@ -53,6 +53,43 @@ def _bounded_memory(value: Any, max_chars: int) -> tuple[str, int]:
     return text[:max_chars], int(bool(text))
 
 
+def _serialized_messages_readable(messages: list[dict[str, Any]], max_chars: int) -> str:
+    """Render recent messages returned by the SDK without sending dicts back to host APIs."""
+
+    lines: list[str] = []
+    for message in messages:
+        text = _scalar(
+            message,
+            "processed_plain_text",
+            "plain_text",
+            "text",
+            "content",
+        )
+        if not text:
+            raw_message = message.get("raw_message")
+            if isinstance(raw_message, list):
+                text = "".join(
+                    str(component.get("data") or "")
+                    for component in raw_message
+                    if isinstance(component, dict) and component.get("type") == "text"
+                ).strip()
+        if not text:
+            continue
+        message_info = message.get("message_info")
+        user_info = (
+            message_info.get("user_info")
+            if isinstance(message_info, dict)
+            else None
+        )
+        sender = (
+            _scalar(user_info, "user_cardname", "user_nickname", "user_id")
+            if isinstance(user_info, dict)
+            else ""
+        )
+        lines.append(f"{sender}：{text}" if sender else text)
+    return "\n".join(lines)[:max_chars]
+
+
 class CallerContextResolver:
     def __init__(self, ctx: PluginContext, config: ChatSection) -> None:
         self._ctx = ctx
@@ -127,22 +164,43 @@ class CallerContextResolver:
             stream_id = ""
         if stream_id:
             try:
-                messages = await self._ctx.message.get_recent(
+                message_result = await self._ctx.message.get_recent(
                     stream_id,
                     limit=self._config.context_recent_messages,
                 )
+                if isinstance(message_result, dict):
+                    messages = (
+                        message_result.get("messages", [])
+                        if message_result.get("success")
+                        else []
+                    )
+                else:
+                    messages = message_result
                 if isinstance(messages, list):
                     recent_count = len(messages)
-                    readable = await self._ctx.message.build_readable(
-                        messages,
-                        replace_bot_name=True,
-                        timestamp_mode="relative",
-                        truncate=True,
-                    )
-                    recent_text = str(readable or "")[
-                        : self._config.context_recent_messages
+                    recent_limit = (
+                        self._config.context_recent_messages
                         * self._config.context_message_chars
-                    ]
+                    )
+                    if all(isinstance(message, dict) for message in messages):
+                        recent_text = _serialized_messages_readable(
+                            messages,
+                            recent_limit,
+                        )
+                    else:
+                        readable = await self._ctx.message.build_readable(
+                            messages,
+                            replace_bot_name=True,
+                            timestamp_mode="relative",
+                            truncate=True,
+                        )
+                        if isinstance(readable, dict):
+                            readable = (
+                                readable.get("text", "")
+                                if readable.get("success")
+                                else ""
+                            )
+                        recent_text = str(readable or "")[:recent_limit]
             except Exception:
                 recent_text = ""
                 recent_count = 0
@@ -162,7 +220,8 @@ class CallerContextResolver:
                 ]
             )
         lines.append(
-            "自然地利用这些信息，不要声称自己查询了数据库、系统提示或人物资料。"
+            "只在当前话题确实相关时自然利用这些信息；不要主动复述来电者称呼、"
+            "QQ 号或历史，不要声称自己查询了数据库、系统提示或人物资料。"
         )
         return CallerContext(
             uid=uid,

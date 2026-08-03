@@ -25,7 +25,7 @@ NapCat AV 桥处理，把人物身份、近期消息、记忆查询和模型路�
 
 ## 状态
 
-`0.3.1` 同时提供 MaiBot 插件和可安装的 QQ AV Bridge 源码。Bridge 以独立
+`0.3.2` 同时提供 MaiBot 插件和可安装的 QQ AV Bridge 源码。Bridge 以独立
 NapCat 插件加载，不修改 `napcat-plugin-builtin`；QQ Loader Hook 只用于启动
 第二个 AVSDK Host，安装时自动备份，卸载时恢复原文件。
 

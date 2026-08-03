@@ -12,6 +12,8 @@ CONTROL_MARKER = "[MAIBOT_QQ_CALL_CONTROL]"
 
 _FILLER_PATTERN = re.compile(
     r"^(?:(?:嗯+|呃+|额+|啊+|哦+|唔+|哎+|喂+|哈+|"
+    r"对+|对吧|是+|是吧|好+|好的|行+|可以+|没事|没有|"
+    r"这个|那个|知道了?|明白了?|不好意思|"
     r"嗯哼+|咳+|咳咳+|h+m+|u+h+m+|u+h+|u+m+|oh+|ok(?:ay)?|yeah+|yep+))+$",
     re.IGNORECASE,
 )

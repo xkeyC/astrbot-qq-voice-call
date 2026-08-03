@@ -90,6 +90,7 @@ def test_manifest_declares_every_host_capability_used_by_runtime() -> None:
     assert set(manifest["capabilities"]) == {
         "llm.generate",
         "llm.transcribe_audio",
+        "config.get",
         "chat.open_session",
         "maisaka.context.append",
         "message.get_recent",

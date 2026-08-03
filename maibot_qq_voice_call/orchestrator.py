@@ -50,13 +50,15 @@ class CallOrchestrator:
             config.audio,
             self.status,
             logger,
-            on_speech_started=self.stop_speaking,
+            on_speech_started=self._on_speech_started,
         )
         self.transcript_gate = TranscriptGate(config.chat.pending_transcript_seconds)
         self.active_call = asyncio.Event()
         self.stop_event = asyncio.Event()
         self.utterance_queue: asyncio.Queue[CallUtterance] = asyncio.Queue(maxsize=1)
         self.response_lock = asyncio.Lock()
+        self.pending_chat_task: asyncio.Task[str] | None = None
+        self.speech_generation = 0
         self.close_lock = asyncio.Lock()
         self.closed = False
         self.context_active_invite = ""
@@ -228,10 +230,23 @@ class CallOrchestrator:
         if self.tts is None:
             return False
         try:
-            return await self.tts.stop()
+            stopped = await self.tts.stop()
+            if stopped:
+                self.logger.info("TTS 已被来电者持续发言打断")
+            return stopped
         except Exception as exc:
             self.logger.debug("停止上一段 TTS 失败: %s", exc)
             return False
+
+    async def _on_speech_started(self) -> None:
+        """Make every older reply stale once sustained caller speech begins."""
+
+        self.speech_generation += 1
+        self.chat.invalidate()
+        pending = self.pending_chat_task
+        if pending is not None and not pending.done():
+            pending.cancel()
+        await self.stop_speaking()
 
     async def _handle_transcript(self, transcript: str) -> None:
         self.status.last_transcript = transcript
@@ -243,12 +258,40 @@ class CallOrchestrator:
         if accepted is None:
             self.status.ignored_utterance_count += 1
             return
+        # Interrupt only after ASR produced a meaningful turn. Raw VAD activity can
+        # be background speech and must not chop or reorder the assistant audio.
+        await self.stop_speaking()
         self.status.utterance_count += 1
         self.status.last_transcript = accepted
 
+        reply_invite = self.call_archive_invite
+        reply_generation = self.speech_generation
         started_at = time.perf_counter()
-        reply = await self.chat.ask(accepted)
+        chat_task = asyncio.create_task(
+            self.chat.ask(accepted),
+            name=f"qq-call-reply-{reply_invite or 'unknown'}",
+        )
+        self.pending_chat_task = chat_task
+        parent_task = asyncio.current_task()
+        try:
+            reply = await chat_task
+        except asyncio.CancelledError:
+            if parent_task is not None and parent_task.cancelling():
+                raise
+            self.logger.info("取消已结束或已被新语音取代的模型回复")
+            return
+        finally:
+            if self.pending_chat_task is chat_task:
+                self.pending_chat_task = None
         self.status.last_chat_seconds = round(time.perf_counter() - started_at, 3)
+        if (
+            not reply_invite
+            or not self.active_call.is_set()
+            or self.call_archive_invite != reply_invite
+            or self.speech_generation != reply_generation
+        ):
+            self.logger.info("丢弃已结束、已切换通话或属于上一轮的迟到回复")
+            return
         if reply == WAIT_TOKEN:
             self.status.ignored_utterance_count += 1
             self.status.last_reply = ""
@@ -258,7 +301,13 @@ class CallOrchestrator:
             self.logger.info("通话回复: %s", reply)
         if self.active_call.is_set():
             spoken = await self.speak(reply)
-            if spoken and self.active_call.is_set() and self.call_archive_invite:
+            if (
+                spoken
+                and self.active_call.is_set()
+                and self.call_archive_invite
+                and self.speech_generation == reply_generation
+            ):
+                self.chat.commit_turn(accepted, reply)
                 self.call_turns.append(
                     CallTurn(
                         caller_text=accepted,
@@ -277,7 +326,6 @@ class CallOrchestrator:
             async with self.response_lock:
                 self.status.busy = True
                 try:
-                    await self.stop_speaking()
                     transcript = ""
                     realtime_failed = False
                     if utterance.realtime_transcript is not None:
@@ -337,6 +385,7 @@ class CallOrchestrator:
         self.call_archive_invite = invite_at
         self.call_started_at = time.time()
         self.call_turns = []
+        self.speech_generation = 0
         self.caller_context = CallerContext()
         self.status.current_call_turn_count = 0
         self.status.caller_uid = ""
@@ -349,6 +398,9 @@ class CallOrchestrator:
     def _finish_call(self) -> None:
         if not self.call_archive_invite:
             return
+        self.chat.invalidate()
+        if self.pending_chat_task is not None and not self.pending_chat_task.done():
+            self.pending_chat_task.cancel()
         archive = CallArchive(
             invite_at=self.call_archive_invite,
             caller=self.caller_context,

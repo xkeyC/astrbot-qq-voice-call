@@ -12,6 +12,14 @@ def test_filler_filter_handles_chinese_and_english() -> None:
     assert not is_filler_transcript("嗯我想问一下")
 
 
+def test_filler_filter_drops_repeated_acknowledgements_and_deictic_fragments() -> None:
+    assert is_filler_transcript("好的，好的。")
+    assert is_filler_transcript("这个这个这个")
+    assert is_filler_transcript("嗯，明白了。")
+    assert is_filler_transcript("是吧？")
+    assert not is_filler_transcript("你是谁？")
+
+
 def test_incomplete_turn_is_merged_with_next_segment() -> None:
     now = [10.0]
     gate = TranscriptGate(4.0, clock=lambda: now[0])

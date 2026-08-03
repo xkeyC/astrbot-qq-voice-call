@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from maibot_qq_voice_call.chat import MaiBotPhoneChat
 from maibot_qq_voice_call.config import ChatSection
 from maibot_qq_voice_call.models import CallerContext
-from maibot_qq_voice_call.text import CONTROL_MARKER
+from maibot_qq_voice_call.text import CONTROL_MARKER, WAIT_TOKEN
 
 
 class FakeLLM:
@@ -41,3 +42,42 @@ async def test_chat_routes_through_maibot_and_keeps_caller_context() -> None:
     system_prompt = llm.request["prompt"][0]["content"]
     assert CONTROL_MARKER in system_prompt
     assert "来电者喜欢低延迟语音" in system_prompt
+    assert "不要自称 MaiBot" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_chat_commits_only_spoken_turns_to_history() -> None:
+    llm = FakeLLM()
+    chat = MaiBotPhoneChat(SimpleNamespace(llm=llm), ChatSection())
+
+    first_reply = await chat.ask("第一句")
+    await chat.ask("第二句")
+    assert len(llm.request["prompt"]) == 2
+
+    chat.commit_turn("第一句", first_reply)
+    await chat.ask("第三句")
+    assert llm.request["prompt"][-3:-1] == [
+        {"role": "user", "content": "第一句"},
+        {"role": "assistant", "content": first_reply},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_discards_reply_after_call_context_is_invalidated() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class DelayedLLM:
+        async def generate(self, **kwargs):
+            started.set()
+            await release.wait()
+            return {"success": True, "response": "stale reply"}
+
+    chat = MaiBotPhoneChat(SimpleNamespace(llm=DelayedLLM()), ChatSection())
+    chat.reset(CallerContext(uin="first"))
+    task = asyncio.create_task(chat.ask("hello"))
+    await started.wait()
+    chat.invalidate()
+    release.set()
+
+    assert await task == WAIT_TOKEN

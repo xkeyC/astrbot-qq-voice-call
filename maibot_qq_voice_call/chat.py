@@ -19,17 +19,36 @@ class MaiBotPhoneChat:
         self._caller = CallerContext()
         self._history: deque[dict[str, str]] = deque(maxlen=config.history_messages)
         self._bot_identity = ""
+        self._generation = 0
+        self.update_bot_config({})
 
     def reset(self, caller: CallerContext) -> None:
+        self._generation += 1
         self._caller = caller
         self._history.clear()
+
+    def invalidate(self) -> None:
+        """Invalidate an in-flight reply that belongs to an older speech turn."""
+
+        self._generation += 1
+
+    def commit_turn(self, text: str, reply: str) -> None:
+        """Keep only replies which were actually handed to TTS."""
+
+        self._history.append({"role": "user", "content": text})
+        self._history.append({"role": "assistant", "content": reply})
 
     def update_bot_config(self, config_data: dict[str, Any]) -> None:
         bot = config_data.get("bot", {}) if isinstance(config_data, dict) else {}
         personality = (
             config_data.get("personality", {}) if isinstance(config_data, dict) else {}
         )
-        nickname = str(bot.get("nickname") or "").strip() if isinstance(bot, dict) else ""
+        raw_nickname = bot.get("nickname") if isinstance(bot, dict) else ""
+        if isinstance(raw_nickname, (list, tuple)):
+            nickname = str(raw_nickname[0] if raw_nickname else "").strip()
+        else:
+            nickname = str(raw_nickname or "").strip()
+        nickname = nickname or "麦麦"
         identity = (
             str(personality.get("personality") or "").strip()
             if isinstance(personality, dict)
@@ -41,8 +60,10 @@ class MaiBotPhoneChat:
             else ""
         )
         parts = []
-        if nickname:
-            parts.append(f"你的名字是{nickname}。")
+        parts.append(
+            f"你的名字是{nickname}。被问到你是谁、叫什么或身份时，"
+            f"直接以{nickname}的身份回答，不要自称 MaiBot、机器人或电话插件。"
+        )
         if identity:
             parts.append(identity)
         if reply_style:
@@ -50,6 +71,7 @@ class MaiBotPhoneChat:
         self._bot_identity = "\n".join(parts)
 
     async def ask(self, text: str) -> str:
+        generation = self._generation
         system_parts = [CONTROL_MARKER, self._bot_identity, self._config.system_prompt]
         if self._caller.prompt_context:
             system_parts.append(self._caller.prompt_context)
@@ -70,12 +92,12 @@ class MaiBotPhoneChat:
         if not isinstance(result, dict) or not result.get("success"):
             reason = result.get("error") if isinstance(result, dict) else result
             raise RuntimeError(f"MaiBot LLM 调用失败: {reason or 'unknown error'}")
+        if generation != self._generation:
+            return WAIT_TOKEN
         raw_reply = str(result.get("response") or "").strip()
         if raw_reply == WAIT_TOKEN:
             return WAIT_TOKEN
         reply = clean_tts_text(raw_reply, max_chars=self._config.max_reply_chars)
         if not reply:
             return WAIT_TOKEN
-        self._history.append({"role": "user", "content": text})
-        self._history.append({"role": "assistant", "content": reply})
         return reply

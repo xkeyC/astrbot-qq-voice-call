@@ -266,3 +266,20 @@ async def test_new_speech_only_stops_old_tts_without_cancelling_pending_reply() 
     orchestrator.chat.invalidate.assert_not_called()
     orchestrator.stop_speaking.assert_awaited_once_with()
     pending.cancel()
+
+
+@pytest.mark.asyncio
+async def test_completed_transcript_does_not_repeat_barge_in() -> None:
+    orchestrator = CallOrchestrator(
+        SimpleNamespace(),
+        QQVoiceCallConfig(),
+        logging.getLogger(__name__),
+    )
+    orchestrator.active_call.set()
+    orchestrator.call_archive_invite = "invite-active"
+    orchestrator.chat.ask = AsyncMock(return_value=WAIT_TOKEN)
+    orchestrator.stop_speaking = AsyncMock(return_value=True)
+
+    await orchestrator._handle_transcript("a complete meaningful transcript")
+
+    orchestrator.stop_speaking.assert_not_awaited()

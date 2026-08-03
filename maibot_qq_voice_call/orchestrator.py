@@ -258,9 +258,6 @@ class CallOrchestrator:
         if accepted is None:
             self.status.ignored_utterance_count += 1
             return
-        # A meaningful ASR turn may interrupt audible TTS. Raw VAD barge-in is kept
-        # separate and never invalidates model work because it can be background speech.
-        await self.stop_speaking()
         self.status.utterance_count += 1
         self.status.last_transcript = accepted
 

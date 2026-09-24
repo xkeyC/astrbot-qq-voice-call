@@ -11,10 +11,10 @@ NapCat bridge plugin ── WebSocket /v1/stream ──────────�
     └─ pacat → astrbot_qq_mic                              │ PcmMedia
                                                            ▼
                                         astrbot.core.voice.VoiceSession
-                                           │ WebRTC (aiortc)      │ voice agent thread
+                                           │ WebRTC (aiortc)      │ handoffs (VoiceChat)
                                            ▼                      ▼
-                                   Codex realtime (v3)    tools / memories of the
-                                   listens and speaks     caller's private chat
+                                   Codex realtime (v3)    a turn of the caller's
+                                   listens and speaks     private chat, as the caller
 ```
 
 ## Components
@@ -41,8 +41,11 @@ NapCat bridge plugin ── WebSocket /v1/stream ──────────�
 ### Core voice session (AstrBot fork, `astrbot/core/voice/`)
 
 Shared with the Mumble platform: WebRTC signalling through the Codex binding,
-the voice agent thread and its member tools, proxy relay over ICE-TCP, and the
-session lifecycle. The plugin only supplies audio (`PcmMedia`) and prompts.
+media over ICE-TCP, the session lifecycle, and `VoiceChat`, which runs what
+the voice model hands off as a turn of the paired chat (the caller's private
+chat, as the caller: same context, persona, tools, memories; queued with text
+messages; answers spoken, not posted). The plugin supplies audio (`PcmMedia`),
+prompts and the chat.
 
 ## Call lifecycle
 
@@ -51,9 +54,10 @@ session lifecycle. The plugin only supplies audio (`PcmMedia`) and prompts.
 2. The plugin waits briefly for the caller's QQ number, opens the voice
    session, and holds the caller's audio until the model listens.
 3. The model hears the caller continuously; barge-in is handled by the
-   realtime server. Real tasks are handed to the voice agent thread.
-4. When the phase leaves `connected`, the session closes; the voice thread is
-   unloaded and resumed on the next call from the same person.
+   realtime server. Real tasks are handed to the caller's private chat, whose
+   answer the model speaks.
+4. When the phase leaves `connected`, the session closes. A session that ends
+   on its own, or does not start within 150 s, hangs the call up.
 
 ## Outgoing calls
 

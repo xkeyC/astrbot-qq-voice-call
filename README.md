@@ -1,178 +1,70 @@
-# MaiBot QQ Voice Call
+# AstrBot QQ Voice Call
 
-一个面向 MaiBot 1.x 的 QQ 语音电话插件。它把 QQ 通话媒体链路交给独立的
-NapCat AV 桥处理，把人物身份、近期消息、记忆查询和模型路由留在 MaiBot
-插件 SDK 内。
+让 AstrBot 接听和拨打 QQ 语音电话。通话由 Codex 实时语音全双工完成：边听边说、可以随时打断；遇到需要查资料或动手的事，交给后台的语音 Agent 处理。
 
-它为 MaiBot 增加 QQ 实时语音通话入口，让电话里的麦麦继续复用 MaiBot
-的人设、记忆和模型体系。
+本项目从 [maibot-qq-voice-call](https://github.com/ClaudiaGardner/maibot-qq-voice-call)（GPL-3.0）改造而来：保留了它的 NapCat AV 桥，原来串联的 DashScope ASR → LLM → TTS 整体换成了 AstrBot 的实时语音会话（和 Mumble 平台用的是同一套）。
 
-<p align="center">
-  <img src="docs/assets/qq-voice-call-demo.png" alt="麦麦 QQ 语音通话界面" width="360">
-</p>
+> 需要 **AstrBot Codex fork**（提供 `astrbot.core.voice`），并在 Codex 执行器里登录一个包含 Codex 语音的 ChatGPT 订阅账号。上游 AstrBot 用不了。
 
-当前版本只提供生产用的 API 链路：
+## 工作方式
 
-1. 外部 NapCat AV 桥处理来电、接听和 QQ 音频设备。
-2. Qwen 实时 ASR 在用户说话时持续上传音频。
-3. `ctx.person`、`ctx.chat` 和 `ctx.message` 组装来电者上下文。
-4. `ctx.llm` 调用 MaiBot 已配置的电话回复模型，不经过 Planner。
-5. Qwen3 实时克隆 TTS 将首包直接送进 QQ 麦克风。
-6. 挂断后清洗有效对话，生成摘要和有原话证据的关键人物事实，并静默写回
-   对应来电者的 MaiBot 私聊。
+```text
+QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot 插件 ──WebRTC──> Codex realtime
+                 │  文本帧：通话状态                         │
+                 │  二进制帧：PCM 音频（双向）                 └─ 语音 Agent 线程（配套来电者私聊的工具、权限、记忆）
+                 └─ PulseAudio 虚拟声卡 ⇄ QQ 的扬声器和麦克风
+```
 
-仓库不包含 NapCat、QQ、IndexTTS、GPT-SoVITS 或其他本地推理模型。
+- **来电**：桥自动接听。接通后插件为来电者开一个实时语音会话，bot 先开口打招呼。
+- **去电**：LLM 工具 `qq_voice_call(purpose, user_id)` 负责拨号。对方接听后，bot 根据 `purpose` 说明来意。**目前桥还不支持拨号**，这个接口会返回 501，工具会如实告诉模型，见“状态”。
+- **会话配套**：每通电话配套到 `<aiocqhttp 平台 ID>:FriendMessage:<QQ号>`。语音 Agent 拿到的是普通成员在这个私聊里能用的工具、审批规则和执行环境；开启记忆时，能读全局记忆和这个私聊的记忆。语音线程按来电者持久化，下次来电接着用。
+- **权限**：`qq_voice_call` 是普通插件工具，谁能用、能不能拨给别人，都由现有的工具权限规则决定。
 
 ## 状态
 
-`0.3.4` 同时提供 MaiBot 插件和可安装的 QQ AV Bridge 源码。Bridge 以独立
-NapCat 插件加载，不修改 `napcat-plugin-builtin`；QQ Loader Hook 只用于启动
-第二个 AVSDK Host，安装时自动备份，卸载时恢复原文件。
+| 功能 | 状态 |
+|---|---|
+| 接听来电、全双工对话、打断 | 桥端原有实现 + 新的实时语音会话；待在 NapCat Docker 里端到端验证 |
+| WebSocket 音频/状态通道（可跨容器） | 已实现，有测试 |
+| 主动拨号 `/v1/calls/dial`、挂断 `/v1/calls/hangup` | 接口已预留（返回 501）；AVSDK 的 `startCall`/`invite` 指令还需要在 Linux QQ 上逆向 |
 
-接通时若来电者已有近期 QQ 对话或人物记忆，麦麦会先用电话回复模型生成一句
-自然的上下文开场白；没有可用上下文、模型超时或失败时使用固定问候。若来电者
-已经开始说话，插件会取消或跳过开场生成，不阻塞第一轮正常对话。
+## 安装
 
-仓库仍不分发 QQ、NapCat 或 `libAVSDKPlugin.so`。Bridge 只加载用户自己的 QQ
-安装所附带的 AVSDK，因此 QQ/NapCat 升级后应先运行诊断并重新做一次来电测试。
+### 1. QQ AV 桥（Linux，和 NapCat/QQ 在同一台机器或同一个容器）
 
-## 挂断后的记忆回写
+见 [`bridge/README.md`](bridge/README.md)。安装器会装好 NapCat 插件、AV Host、PulseAudio 虚拟设备和 Token 文件。
 
-每次已接通的电话结束后，插件会在后台完成以下操作，不阻塞下一次来电：
-
-1. 再次过滤语气词、噪声误识别、重复内容、未完成句子、`[WAIT]` 和内部控制文本。
-2. 只保留对方有效发言与麦麦完整播放的回复；被插话打断的回复不会写入电话上下文
-   或挂断后的记忆记录。
-3. 通过 MaiBot 的模型任务生成简短摘要；人物事实必须带有对方逐字原话证据，
-   不把麦麦的回复或模型推断当成来电者事实。
-4. 通过消息网关把记录写进该 QQ 来电者的私聊历史，并用内部 Command 静默拦截，
-   因而挂断后不会额外向 QQ 发送一条文字回复。
-5. 同时把同一记录追加到 Maisaka 当前上下文；持久化后的私聊记录会继续作为
-   MaiBot 正常记忆学习链路的对话证据。
-
-这一过程只使用公开插件 SDK，不直接读写 MaiBot 数据库。可在 WebUI 的
-`memory` 配置段关闭写回、调整摘要任务或限制归档长度。
-
-## 要求
-
-- MaiBot `1.0.0` 及以上
-- `maibot-plugin-sdk` `2.5.4` 及以上、`3.0` 以下
-- Python 3.12+
-- Linux、PulseAudio/PipeWire Pulse 兼容层、`parec` 和 `pacat`
-- NapCat `4.14.0` 及以上与 Linux QQ（需包含 `libAVSDKPlugin.so`）
-- PulseAudio、`pactl`、`parec`、`pacat`、`xvfb-run` 和 `curl`
-- DashScope 实时 ASR 与实时克隆 TTS 权限
-- MaiBot 模型管理中可用的电话回复模型
-
-## 安装 MaiBot 插件
-
-将仓库克隆到 MaiBot 的第三方插件目录：
+AstrBot 不在同一个网络命名空间里时（例如在另一个容器里），让桥监听容器网络：
 
 ```bash
-cd /path/to/MaiBot/plugins
-git clone https://github.com/ClaudiaGardner/maibot-qq-voice-call.git
+ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0 ~/.local/share/astrbot-qq-voice-call/scripts/run-napcat.sh
 ```
 
-把密钥放在 MaiBot 进程环境中，不要写进仓库或 `config.toml`：
+桥的每个接口（`/healthz` 除外）都要求 Token。不要把端口暴露到公网。
 
-```bash
-export DASHSCOPE_API_KEY="..."
-export MAIBOT_QQ_CALL_VOICE_ID="..."
-```
+### 2. AstrBot 插件
 
-## 安装 QQ AV Bridge
+把本仓库放到 AstrBot 的 `data/plugins/` 下（或者在 WebUI 里用仓库地址安装），然后在插件配置里填写：
 
-先安装并确认 Linux QQ 与 NapCat 能正常登录。然后在仓库根目录运行：
+- `bridge_url`：桥的地址，默认 `http://127.0.0.1:6110`
+- `bridge_token` 或 `bridge_token_file`：桥的 Token
+- `platform_id`：配套的 aiocqhttp 平台 ID，留空就用第一个
+- `voice_name`、`voice`、`voice_prompt` 等：电话里的名字、音色和附加提示词
 
-```bash
-./bridge/scripts/install.sh \
-  --napcat-dir /path/to/QQ/resources/app/app_launcher/napcat \
-  --qq-dir /path/to/QQ \
-  --check
-
-./bridge/scripts/install.sh \
-  --napcat-dir /path/to/QQ/resources/app/app_launcher/napcat \
-  --qq-dir /path/to/QQ
-```
-
-安装器会完成以下操作：
-
-- 把 `napcat-plugin-maibot-qq-voice-call` 安装到 NapCat 的独立 `plugins/` 目录；
-- 在 `~/.local/share/maibot-qq-voice-call` 安装 AV Host 与运行脚本；
-- 创建权限为 `0600` 的 32 字节随机 Bridge Token；
-- 备份 QQ 原始 Loader，再安装带明确标记的最小可逆 Hook。
-
-安装完成后，把终端显示的 Token 文件路径填入 MaiBot 的
-`bridge.token_file`，再用桥接脚本启动机器人 QQ：
-
-```bash
-MAIBOT_QQ_CALL_BOT_UIN="机器人QQ号" \
-  ~/.local/share/maibot-qq-voice-call/scripts/run-napcat.sh
-```
-
-验证所有组件：
-
-```bash
-~/.local/share/maibot-qq-voice-call/scripts/doctor.sh
-```
-
-卸载默认保留运行目录与 Token，便于恢复；`--purge` 才会一并删除：
-
-```bash
-~/.local/share/maibot-qq-voice-call/scripts/uninstall.sh
-```
-
-现有服务、容器、自定义端口和升级兼容说明见
-[`bridge/README.md`](bridge/README.md)。
-
-## 配置
-
-启动 MaiBot 后，在 WebUI 插件配置中至少填写：
-
-- `plugin.enabled = true`
-- `plugin.account_id`：机器人 QQ 号
-- `chat.task_name = "utils"`（仓库默认值）
-- 在 MaiBot 模型管理中确认 `deepseek-v4-flash` 位于 `utils.model_list`
-- `chat.contextual_greeting_enabled = true`：有历史上下文时生成开场白
-- `chat.greeting_timeout_seconds = 2.5`：超时后立即使用固定问候
-- `memory.summary_task_name = "utils"`（默认复用同一轻量模型任务）
-- `bridge.token_file`：安装器输出的 Token 文件路径
-- `audio.capture_device = "maibot_qq_speaker.monitor"`
-- `audio.playback_device = "maibot_qq_mic"`
-- `audio.pulse_server`：安装目录下的 `runtime/pulse/native` Unix socket
-
-Runner 会根据配置模型生成 `config.toml`。完整示例见
-[`examples/config.example.toml`](examples/config.example.toml)。
-
-## 插件 API
-
-- `github.claudiagardner.maibot-qq-voice-call.get_call_status`：通话状态、最近 ASR/LLM/TTS
-  耗时及最后一次记忆写回结果
-- `github.claudiagardner.maibot-qq-voice-call.test_phone_reply`：不公开的电话回复测试入口
-
-## 安全
-
-AV 桥强制只监听回环地址，并对状态与控制接口校验 Bearer Token。安装器不会
-读取或复制 QQ 登录态，也不会把 Token 写进 Git 仓库。Loader Hook 和 AVSDK
-属于 QQ/NapCat 版本敏感集成；升级后二次验证前不要直接切换生产账号。
-更多边界见 [`SECURITY.md`](SECURITY.md)。
+AstrBot 这边不需要装 PulseAudio 或 parec/pacat。
 
 ## 开发
 
 ```bash
-uv sync --extra dev
-uv run pytest
-uv run ruff check .
+# 插件测试需要 AstrBot Codex fork 的 Python 环境
+PYTHONPATH=/path/to/AstrBot python -m pytest tests -o asyncio_mode=auto
+ruff check .
 node --test bridge/tests/*.test.mjs
 bash -n bridge/scripts/*.sh
 ```
 
-架构和迁移说明分别见
-[`docs/architecture.md`](docs/architecture.md) 与
-[`docs/migration.md`](docs/migration.md)。
-版本变化见 [`CHANGELOG.md`](CHANGELOG.md)。
+协议见 [`bridge/PROTOCOL.md`](bridge/PROTOCOL.md)，架构见 [`docs/architecture.md`](docs/architecture.md)。
 
 ## 许可证
 
-本项目使用 GPL-3.0-only。第三方组件说明见
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+GPL-3.0-only。原项目的署名和第三方说明见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

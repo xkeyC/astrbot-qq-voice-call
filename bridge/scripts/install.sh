@@ -3,9 +3,9 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 bridge_source=$(cd -- "$script_dir/.." && pwd -P)
-install_dir=${MAIBOT_QQ_CALL_BRIDGE_DIR:-$HOME/.local/share/maibot-qq-voice-call}
-napcat_dir=${MAIBOT_QQ_CALL_NAPCAT_DIR:-}
-qq_dir=${MAIBOT_QQ_CALL_QQ_DIR:-}
+install_dir=${ASTRBOT_QQ_CALL_BRIDGE_DIR:-$HOME/.local/share/astrbot-qq-voice-call}
+napcat_dir=${ASTRBOT_QQ_CALL_NAPCAT_DIR:-}
+qq_dir=${ASTRBOT_QQ_CALL_QQ_DIR:-}
 check_only=0
 original_loader=""
 
@@ -70,8 +70,8 @@ qq_dir=$(readlink -f -- "$qq_dir")
 install_dir=$(readlink -m -- "$install_dir")
 qq_app_dir="$qq_dir/resources/app"
 loader_path="$qq_app_dir/loadNapCat.js"
-backup_path="$qq_app_dir/loadNapCat.maibot-qq-call.backup.cjs"
-plugin_dir="$napcat_dir/plugins/napcat-plugin-maibot-qq-voice-call"
+backup_path="$qq_app_dir/loadNapCat.astrbot-qq-call.backup.cjs"
+plugin_dir="$napcat_dir/plugins/napcat-plugin-astrbot-qq-voice-call"
 token_file="$install_dir/runtime/control.token"
 plugins_config="$napcat_dir/config/plugins.json"
 python_bin=${PYTHON_BIN:-python3}
@@ -106,7 +106,7 @@ if ! grep -Eq '"main"[[:space:]]*:[[:space:]]*"(\./)?loadNapCat\.js"' \
   exit 1
 fi
 if grep -q 'AV_HOST' "$loader_path" && \
-  ! grep -q 'MAIBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path" && \
+  ! grep -q 'ASTRBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path" && \
   [[ -z $original_loader ]]; then
   printf '%s\n' \
     'an older custom AV Host loader is installed; pass --original-loader with a clean Loader backup' \
@@ -126,7 +126,7 @@ command -v "$python_bin" >/dev/null 2>&1 || {
   exit 1
 }
 loader_hook_installed=0
-if grep -q 'MAIBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path"; then
+if grep -q 'ASTRBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path"; then
   loader_hook_installed=1
   [[ -f "$backup_path" ]] || {
     printf 'loader hook exists but its backup is missing: %s\n' "$backup_path" >&2
@@ -145,8 +145,8 @@ NapCat directory: $napcat_dir
 QQ directory:     $qq_dir
 Install directory: $install_dir
 Loader action:    $(
-    if grep -q 'MAIBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path"; then
-      printf 'reuse existing MaiBot hook'
+    if grep -q 'ASTRBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path"; then
+      printf 'reuse existing AstrBot hook'
     else
       if [[ -n $original_loader ]]; then
         printf 'use provided clean loader as backup and replace older hook'
@@ -179,8 +179,8 @@ install -m 0644 "$bridge_source/napcat-plugin/package.json" "$plugin_dir/package
 
 umask 077
 if [[ ! -f "$token_file" ]]; then
-  if [[ -n ${MAIBOT_QQ_CALL_BRIDGE_TOKEN:-} ]]; then
-    printf '%s\n' "$MAIBOT_QQ_CALL_BRIDGE_TOKEN" >"$token_file"
+  if [[ -n ${ASTRBOT_QQ_CALL_BRIDGE_TOKEN:-} ]]; then
+    printf '%s\n' "$ASTRBOT_QQ_CALL_BRIDGE_TOKEN" >"$token_file"
   elif command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32 >"$token_file"
   else
@@ -225,7 +225,7 @@ if path.exists():
 else:
     data = {}
     mode = 0o600
-data["napcat-plugin-maibot-qq-voice-call"] = True
+data["napcat-plugin-astrbot-qq-voice-call"] = True
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
 try:
     temporary.write_text(
@@ -247,15 +247,15 @@ if [[ $loader_hook_installed -eq 0 ]]; then
   json_host_entry=${install_dir//\\/\\\\}
   json_host_entry=${json_host_entry//\"/\\\"}
   json_host_entry="$json_host_entry/av-host/host.cjs"
-  hook_tmp="$qq_app_dir/.loadNapCat.maibot-qq-call.$$"
+  hook_tmp="$qq_app_dir/.loadNapCat.astrbot-qq-call.$$"
   trap 'rm -f -- "$hook_tmp"' EXIT
   cat >"$hook_tmp" <<EOF
 "use strict";
-// MAIBOT_QQ_CALL_LOADER_HOOK_V1
-if (process.env.MAIBOT_QQ_CALL_AV_HOST === "1") {
-  require(process.env.MAIBOT_QQ_CALL_AV_HOST_ENTRY || "$json_host_entry");
+// ASTRBOT_QQ_CALL_LOADER_HOOK_V1
+if (process.env.ASTRBOT_QQ_CALL_AV_HOST === "1") {
+  require(process.env.ASTRBOT_QQ_CALL_AV_HOST_ENTRY || "$json_host_entry");
 } else {
-  require("./loadNapCat.maibot-qq-call.backup.cjs");
+  require("./loadNapCat.astrbot-qq-call.backup.cjs");
 }
 EOF
   chmod "$(stat -c '%a' "$loader_path")" "$hook_tmp"
@@ -264,15 +264,15 @@ EOF
 fi
 
 cat <<EOF
-MaiBot QQ voice-call bridge installed.
+AstrBot QQ voice-call bridge installed.
 
 NapCat plugin: $plugin_dir
 Plugin enabled: $plugins_config
 Bridge runtime: $install_dir
 Token file:     $token_file
 
-Set MaiBot bridge.token_file to the token file above, then start NapCat with:
-  MAIBOT_QQ_CALL_BOT_UIN=<bot-uin> $install_dir/scripts/run-napcat.sh
+Set AstrBot bridge.token_file to the token file above, then start NapCat with:
+  ASTRBOT_QQ_CALL_BOT_UIN=<bot-uin> $install_dir/scripts/run-napcat.sh
 
 Run diagnostics with:
   $install_dir/scripts/doctor.sh

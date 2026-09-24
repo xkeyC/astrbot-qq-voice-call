@@ -16,16 +16,16 @@ ensure_runtime_dirs
 
 exec 9>"$runtime_dir/av-host.lock"
 if ! flock -n 9; then
-  printf '[MaiBotQQCallAVHost] another supervised AV host is already running\n' >&2
+  printf '[AstrBotQQCallAVHost] another supervised AV host is already running\n' >&2
   exit 0
 fi
 
-export MAIBOT_QQ_CALL_AV_HOST=1
-export MAIBOT_QQ_CALL_AV_HOST_ENTRY="$bridge_dir/av-host/host.cjs"
-export MAIBOT_QQ_CALL_BRIDGE_DIR="$bridge_dir"
-export MAIBOT_QQ_CALL_QQ_DIR="$qq_dir"
-export MAIBOT_QQ_CALL_AVSDK_PATH="$avsdk_path"
-export MAIBOT_QQ_CALL_BRIDGE_TOKEN_FILE="$token_file"
+export ASTRBOT_QQ_CALL_AV_HOST=1
+export ASTRBOT_QQ_CALL_AV_HOST_ENTRY="$bridge_dir/av-host/host.cjs"
+export ASTRBOT_QQ_CALL_BRIDGE_DIR="$bridge_dir"
+export ASTRBOT_QQ_CALL_QQ_DIR="$qq_dir"
+export ASTRBOT_QQ_CALL_AVSDK_PATH="$avsdk_path"
+export ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE="$token_file"
 export PULSE_SERVER="$pulse_server"
 avsdk_dir=$(dirname -- "$avsdk_path")
 export LD_LIBRARY_PATH="$avsdk_dir:$avsdk_dir/bugly${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -37,9 +37,9 @@ while true; do
     --user-data-dir="$runtime_dir/av-host-profile"
   status=$?
   set -e
-  if [[ ${MAIBOT_QQ_CALL_RESTART_AV_HOST:-1} != 1 ]]; then
+  if [[ ${ASTRBOT_QQ_CALL_RESTART_AV_HOST:-1} != 1 ]]; then
     exit "$status"
   fi
-  printf '[MaiBotQQCallAVHost] exited with status %s; restarting\n' "$status" >&2
+  printf '[AstrBotQQCallAVHost] exited with status %s; restarting\n' "$status" >&2
   sleep 2
 done

@@ -1,20 +1,22 @@
 # Third-party notices
 
 This repository contains original integration code and does not redistribute
-MaiBot, NapCat, QQ, model weights or provider SDK source.
+AstrBot, NapCat, QQ, model weights or provider SDK source.
 
-## MaiBot
+## maibot-qq-voice-call
 
-MaiBot is available under GPL-3.0. This plugin communicates with MaiBot through
-the public plugin SDK capability interface.
+This project is derived from maibot-qq-voice-call by ClaudiaGardner
+(GPL-3.0-only): the QQ AV bridge under `bridge/` is its work, adapted for
+AstrBot. The MaiBot plugin code was replaced.
 
-<https://github.com/Mai-with-u/MaiBot>
+<https://github.com/ClaudiaGardner/maibot-qq-voice-call>
 
-## maibot-plugin-sdk
+## AstrBot
 
-The SDK is a runtime dependency distributed separately under LGPL-3.0-only.
+AstrBot is available under AGPL-3.0. This plugin runs inside AstrBot and uses
+its voice session module (`astrbot.core.voice`) of the Codex fork.
 
-<https://github.com/Mai-with-u/maibot-plugin-sdk>
+<https://github.com/xkeyC/AstrBot>
 
 ## aiohttp
 
@@ -37,6 +39,5 @@ copied into releases or this repository.
 
 ## Cloud models
 
-Qwen realtime ASR and TTS are accessed over user-configured APIs. No model
-weights or provider credentials are included. Use is subject to the provider's
-current service terms.
+Voice runs on OpenAI's Codex realtime service through the user's own ChatGPT
+account. No credentials are included; use is subject to OpenAI's terms.

@@ -1,29 +1,24 @@
 # QQ AV Bridge Protocol
 
-插件把 QQ/AVSDK 的非公开实现隔离在独立桥接进程中。桥和插件必须运行在
-同一受信任主机；默认通过回环 HTTP 传递状态，通过 PulseAudio 设备传递音频。
+桥把 QQ/AVSDK 的非公开实现隔离在独立进程里，对 AstrBot 只暴露通话状态和通话音频。
 
 ## 鉴权
 
-除仅返回存活布尔值的 `GET /healthz` 外，所有请求必须携带：
+除了只返回存活布尔值的 `GET /healthz`，所有请求（包括 WebSocket 升级）都必须携带：
 
 ```http
 Authorization: Bearer <random-token>
 ```
 
-Token 至少使用 32 字节随机值。服务不得监听公网地址。
+Token 至少 32 字节随机值。控制端口默认只监听 `127.0.0.1`；用 `ASTRBOT_QQ_CALL_BRIDGE_HOST` 可以改成容器网络地址，但不要暴露到公网。
 
-仓库实现额外使用两个仅供 Bridge 内部调用的鉴权端点：AV Host 的
-`POST /v1/invoke` 和 NapCat Bridge 的 `POST /v1/avsdk/output`。它们不是
-MaiBot 插件 API，且命令白名单仅包含登录、接听和 Kernel 数据转发。
+另外两个鉴权端点只供桥内部使用：AV Host 的 `POST /v1/invoke`（固定只监听回环地址）和 NapCat 插件的 `POST /v1/avsdk/output`。它们不属于 AstrBot 接口。
 
 ## 当前通话
 
 ```http
 GET /v1/calls/current
 ```
-
-成功响应：
 
 ```json
 {
@@ -37,31 +32,39 @@ GET /v1/calls/current
 }
 ```
 
-`phase` 支持：
+`phase` 可能的值：`idle`、`ringing`、`accepting`、`accepted`、`connected`、`ended`、`error`。只有 `connected` 表示 AVSDK 已经进入房间，可以收发音频。`inviteAt` 用来区分每一通电话。对于去电，`callerUin` 和 `callerName` 指的是对方。
 
-- `idle`
-- `ringing`
-- `accepting`
-- `accepted`
-- `connected`
-- `ended`
-- `error`
+## 通话流
 
-只有 `connected` 表示 AVSDK 已进入房间、音频设备可以收发。
+```http
+GET /v1/stream   (WebSocket)
+```
 
-## 音频边界
+- **文本帧**（桥 → AstrBot）：`{"type": "call", "call": {...}}`，`call` 的字段同上。连接建立后立即发一次，之后每次状态变化再发。
+- **二进制帧**（双向）：通话音频，格式为 16 位小端、单声道、48 kHz PCM。
+  - 桥 → AstrBot：对方的声音，只在 `connected` 期间发送，每帧长度不固定，但都是整数个采样。
+  - AstrBot → 桥：bot 的声音，桥直接写入 QQ 的麦克风，播放缓冲约 60 ms。
+- 客户端发的帧不能分片。支持 ping/pong 和 close。
 
-- 桥把对端声音输出到一个 PulseAudio sink；插件读取其 monitor source。
-- 插件把 TTS 播放到一个 PulseAudio sink；桥把该 sink 作为 QQ 麦克风输入。
-- 默认设备名分别为 `maibot_qq_speaker.monitor`、`maibot_qq_mic` 和
-  `maibot_qq_mic_source`。
-- ASR 输入格式为单声道 PCM S16LE 16 kHz。
-- 默认 TTS 输出格式为单声道 PCM S16LE 24 kHz。
+有客户端连着、通话处于 `connected` 时，桥端才会运行 `parec`/`pacat`。
 
-桥不得把鉴权票据、QQ Cookie、登录态、Native 指针或 AVSDK 原始事件载荷
-返回给插件。
+## 拨号与挂断
+
+```http
+POST /v1/calls/dial     {"uin": "123456789"}
+POST /v1/calls/hangup
+```
+
+目前都返回 `501`：AVSDK 发起和结束通话的指令还没有逆向出来。实现后，拨号成功返回 `200`，接下来的通话状态照常通过通话流推送。
+
+## 音频设备
+
+- 对方的声音由 QQ 输出到 PulseAudio sink `astrbot_qq_speaker`，桥读它的 monitor source。
+- bot 的声音由桥播放到 sink `astrbot_qq_mic`，QQ 把 `astrbot_qq_mic_source` 当作麦克风。
+- 设备名可以用 `ASTRBOT_QQ_CALL_CAPTURE_DEVICE`、`ASTRBOT_QQ_CALL_PLAYBACK_DEVICE` 覆盖。
+
+桥不会向 AstrBot 返回鉴权票据、QQ Cookie、登录态、Native 指针或 AVSDK 原始事件载荷。
 
 ## 兼容性
 
-本协议只规定公开边界，不规定 NapCat/QQ 内部方法。桥实现应单独处理具体
-NapCat 与 QQ 版本变化。
+本协议只规定公开边界，不规定 NapCat/QQ 的内部方法。NapCat 与 QQ 的版本差异由桥自己处理。

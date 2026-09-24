@@ -1,4 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createHash, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -9,6 +10,12 @@ const MAX_EVENTS = 100;
 const SENSITIVE_KEY =
   /(auth|ticket|token|sign|open_?key|d2|a2|cookie|session|credential|password|secret)/i;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const MAX_WS_FRAME = 1024 * 1024;
+// Call audio on the stream: 16-bit little-endian mono PCM at 48 kHz, both ways.
+const PCM_ARGS = ["--raw", "--format=s16le", "--rate=48000", "--channels=1"];
+const STREAM_TICK_MS = 100;
+const AUDIO_RETRY_MS = 2000;
 
 let logger = null;
 let pluginContext = null;
@@ -23,6 +30,12 @@ let listenerId = null;
 let activeSDKInvite = null;
 let loginTimer = null;
 let acceptTimer = null;
+let streamTimer = null;
+const streamClients = new Set();
+let lastStreamedCall = "";
+let capture = null;
+let playback = null;
+let audioRetryAt = 0;
 
 const state = {
   startedAt: null,
@@ -35,6 +48,7 @@ const state = {
   events: [],
   avHost: idleAVHost(),
   call: idleCall(),
+  stream: { clients: 0, audio: false, audioError: null },
 };
 
 function idleAVHost() {
@@ -88,30 +102,39 @@ export function parseBridgeSettings(env = process.env, pluginDir = PLUGIN_DIR) {
     }
     fileConfig = parsed;
   }
-  const controlHost = env.MAIBOT_QQ_CALL_BRIDGE_HOST || fileConfig.controlHost || "127.0.0.1";
-  const avHost = env.MAIBOT_QQ_CALL_AV_HOST_HOST || fileConfig.avHost || "127.0.0.1";
-  if (!LOOPBACK_HOSTS.has(controlHost) || !LOOPBACK_HOSTS.has(avHost)) {
-    throw new Error("bridge endpoints must use a loopback host");
+  // The control endpoint may listen beyond loopback (AstrBot in another
+  // container); every request but /healthz still needs the token. The AV
+  // host endpoint is internal to this machine and stays on loopback.
+  const controlHost = env.ASTRBOT_QQ_CALL_BRIDGE_HOST || fileConfig.controlHost || "127.0.0.1";
+  const avHost = env.ASTRBOT_QQ_CALL_AV_HOST_HOST || fileConfig.avHost || "127.0.0.1";
+  if (!LOOPBACK_HOSTS.has(avHost)) {
+    throw new Error("the AV host endpoint must use a loopback host");
   }
   return {
     controlHost,
     controlPort: integerSetting(
-      env.MAIBOT_QQ_CALL_BRIDGE_PORT || fileConfig.controlPort,
+      env.ASTRBOT_QQ_CALL_BRIDGE_PORT || fileConfig.controlPort,
       6110,
       "bridge port",
     ),
     avHost,
     avPort: integerSetting(
-      env.MAIBOT_QQ_CALL_AV_HOST_PORT || fileConfig.avPort,
+      env.ASTRBOT_QQ_CALL_AV_HOST_PORT || fileConfig.avPort,
       6111,
       "AV host port",
     ),
     token:
-      typeof env.MAIBOT_QQ_CALL_BRIDGE_TOKEN === "string"
-        ? env.MAIBOT_QQ_CALL_BRIDGE_TOKEN.trim()
+      typeof env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN === "string"
+        ? env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN.trim()
         : "",
     tokenFile:
-      env.MAIBOT_QQ_CALL_BRIDGE_TOKEN_FILE || fileConfig.tokenFile || "",
+      env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE || fileConfig.tokenFile || "",
+    captureDevice:
+      env.ASTRBOT_QQ_CALL_CAPTURE_DEVICE ||
+      fileConfig.captureDevice ||
+      "astrbot_qq_speaker.monitor",
+    playbackDevice:
+      env.ASTRBOT_QQ_CALL_PLAYBACK_DEVICE || fileConfig.playbackDevice || "astrbot_qq_mic",
   };
 }
 
@@ -340,7 +363,7 @@ function scheduleAccept(delayMs) {
     void acceptActiveInvite().catch((error) => {
       state.call.phase = "ringing";
       state.avHost.lastError = `native auto-accept failed: ${error?.message ?? String(error)}`;
-      logger?.warn(`[MaiBotQQCall] ${state.avHost.lastError}`);
+      logger?.warn(`[AstrBotQQCall] ${state.avHost.lastError}`);
     });
   }, delayMs);
   acceptTimer.unref?.();
@@ -468,6 +491,182 @@ async function handleAVSDKOutput(body) {
   state.avHost.lastError = null;
 }
 
+export function encodeWsFrame(opcode, payload) {
+  const length = payload.byteLength;
+  let header;
+  if (length < 126) {
+    header = Buffer.from([0x80 | opcode, length]);
+  } else if (length < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x80 | opcode;
+    header[1] = 126;
+    header.writeUInt16BE(length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x80 | opcode;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(length), 2);
+  }
+  return Buffer.concat([header, payload]);
+}
+
+// Splits the complete WebSocket frames off the front of `buffer`.
+export function decodeWsFrames(buffer) {
+  const frames = [];
+  let rest = buffer;
+  while (rest.length >= 2) {
+    const fin = (rest[0] & 0x80) !== 0;
+    const opcode = rest[0] & 0x0f;
+    const masked = (rest[1] & 0x80) !== 0;
+    let length = rest[1] & 0x7f;
+    let offset = 2;
+    if (length === 126) {
+      if (rest.length < 4) break;
+      length = rest.readUInt16BE(2);
+      offset = 4;
+    } else if (length === 127) {
+      if (rest.length < 10) break;
+      const big = rest.readBigUInt64BE(2);
+      if (big > BigInt(MAX_WS_FRAME)) throw new Error("WebSocket frame is too large");
+      length = Number(big);
+      offset = 10;
+    }
+    if (length > MAX_WS_FRAME) throw new Error("WebSocket frame is too large");
+    const maskOffset = offset;
+    if (masked) offset += 4;
+    if (rest.length < offset + length) break;
+    const payload = Buffer.from(rest.subarray(offset, offset + length));
+    if (masked) {
+      for (let i = 0; i < payload.length; i += 1) payload[i] ^= rest[maskOffset + (i % 4)];
+    }
+    frames.push({ fin, opcode, payload });
+    rest = rest.subarray(offset + length);
+  }
+  return { frames, rest };
+}
+
+function broadcast(frame) {
+  for (const socket of streamClients) {
+    if (!socket.destroyed) socket.write(frame);
+  }
+}
+
+function stopAudio() {
+  for (const child of [capture, playback]) {
+    if (child && child.exitCode === null) child.kill("SIGTERM");
+  }
+  capture = null;
+  playback = null;
+}
+
+function startAudio() {
+  let carry = Buffer.alloc(0);
+  const captureChild = spawn(
+    "parec",
+    [
+      ...PCM_ARGS,
+      `--device=${settings.captureDevice}`,
+      "--latency-msec=20",
+      "--client-name=astrbot-qq-call-capture",
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  // Only whole samples go out: a pipe read may end mid-sample.
+  captureChild.stdout.on("data", (chunk) => {
+    const data = carry.length ? Buffer.concat([carry, chunk]) : chunk;
+    const even = data.length & ~1;
+    carry = Buffer.from(data.subarray(even));
+    if (even) broadcast(encodeWsFrame(2, data.subarray(0, even)));
+  });
+  const playbackChild = spawn(
+    "pacat",
+    [
+      ...PCM_ARGS,
+      `--device=${settings.playbackDevice}`,
+      // A short playback buffer keeps barge-in quick.
+      "--latency-msec=60",
+      "--client-name=astrbot-qq-call-playback",
+    ],
+    { stdio: ["pipe", "ignore", "pipe"] },
+  );
+  playbackChild.stdin.on("error", () => {});
+  for (const child of [captureChild, playbackChild]) {
+    child.on("error", (error) => {
+      state.stream.audioError = `${child.spawnfile}: ${error?.message ?? String(error)}`;
+    });
+    child.on("exit", (code) => {
+      if (capture === child || playback === child) {
+        state.stream.audioError ??= `${child.spawnfile} exited with ${code}`;
+        audioRetryAt = Date.now() + AUDIO_RETRY_MS;
+        stopAudio();
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      state.stream.audioError = `${child.spawnfile}: ${String(chunk).trim().slice(0, 300)}`;
+    });
+  }
+  capture = captureChild;
+  playback = playbackChild;
+  state.stream.audioError = null;
+}
+
+// Pushes call state changes and runs call audio while someone listens.
+export function streamTick() {
+  const call = JSON.stringify(state.call);
+  if (call !== lastStreamedCall) {
+    lastStreamedCall = call;
+    broadcast(encodeWsFrame(1, Buffer.from(JSON.stringify({ type: "call", call: state.call }))));
+  }
+  const wanted = streamClients.size > 0 && state.call.phase === "connected";
+  if (wanted && !capture && Date.now() >= audioRetryAt) startAudio();
+  else if (!wanted && capture) stopAudio();
+  state.stream.clients = streamClients.size;
+  state.stream.audio = Boolean(capture);
+}
+
+function attachStream(socket, head) {
+  streamClients.add(socket);
+  socket.setNoDelay(true);
+  socket.write(
+    encodeWsFrame(1, Buffer.from(JSON.stringify({ type: "call", call: state.call }))),
+  );
+  let pending = Buffer.alloc(0);
+  const drop = () => {
+    streamClients.delete(socket);
+    if (!socket.destroyed) socket.destroy();
+  };
+  const onData = (chunk) => {
+    pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+    let decoded;
+    try {
+      decoded = decodeWsFrames(pending);
+    } catch {
+      drop();
+      return;
+    }
+    pending = Buffer.from(decoded.rest);
+    for (const frame of decoded.frames) {
+      if (!frame.fin || frame.opcode === 0) {
+        drop(); // AstrBot never fragments; refuse rather than reassemble.
+        return;
+      }
+      if (frame.opcode === 2) {
+        if (playback?.stdin.writable) playback.stdin.write(frame.payload);
+      } else if (frame.opcode === 8) {
+        streamClients.delete(socket);
+        socket.end(encodeWsFrame(8, Buffer.alloc(0)));
+        return;
+      } else if (frame.opcode === 9) {
+        socket.write(encodeWsFrame(10, frame.payload));
+      }
+    }
+  };
+  socket.on("data", onData);
+  socket.on("close", drop);
+  socket.on("error", drop);
+  if (head?.length) onData(head);
+}
+
 function publicStatus() {
   return {
     version: "0.3.4",
@@ -479,6 +678,7 @@ function publicStatus() {
     serviceMethods: state.serviceMethods,
     avHost: state.avHost,
     call: state.call,
+    stream: state.stream,
     eventCount: state.eventCount,
     recentEvents: state.events.slice(-10),
   };
@@ -501,6 +701,13 @@ async function startControlServer() {
     if (req.method === "GET" && url.pathname === "/v1/calls/current") {
       return sendJson(res, 200, { code: 0, data: state.call });
     }
+    if (
+      req.method === "POST" &&
+      (url.pathname === "/v1/calls/dial" || url.pathname === "/v1/calls/hangup")
+    ) {
+      // The AVSDK commands for placing and ending a call are not known yet.
+      return sendJson(res, 501, { code: -1, message: "not supported by this bridge yet" });
+    }
     if (req.method === "POST" && url.pathname === "/v1/avsdk/output") {
       try {
         await handleAVSDKOutput(await readJsonBody(req));
@@ -513,6 +720,27 @@ async function startControlServer() {
     return sendJson(res, 404, { code: -1, message: "Not Found" });
   });
   controlServer.on("clientError", (_error, socket) => socket.destroy());
+  controlServer.on("upgrade", (req, socket, head) => {
+    const url = new URL(req.url ?? "/", `http://${settings.controlHost}:${settings.controlPort}`);
+    const key = req.headers["sec-websocket-key"];
+    if (
+      url.pathname !== "/v1/stream" ||
+      String(req.headers.upgrade ?? "").toLowerCase() !== "websocket" ||
+      typeof key !== "string" ||
+      !hasValidControlToken(req, controlToken)
+    ) {
+      socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    const accept = createHash("sha1").update(key + WS_GUID).digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    attachStream(socket, head);
+  });
+  streamTimer = setInterval(streamTick, STREAM_TICK_MS);
+  streamTimer.unref?.();
   await new Promise((resolve, reject) => {
     controlServer.once("error", reject);
     controlServer.listen(settings.controlPort, settings.controlHost, resolve);
@@ -557,6 +785,7 @@ export const plugin_init = async (ctx) => {
     events: [],
     avHost: idleAVHost(),
     call: idleCall(),
+    stream: { clients: 0, audio: false, audioError: null },
   });
   try {
     avsdkService = kernelSession?.getAVSDKService?.() ?? null;
@@ -571,13 +800,18 @@ export const plugin_init = async (ctx) => {
     await startControlServer();
     scheduleAVHostLogin(ctx);
     logger.info(
-      `[MaiBotQQCall] bridge listening on ${settings.controlHost}:${settings.controlPort}`,
+      `[AstrBotQQCall] bridge listening on ${settings.controlHost}:${settings.controlPort}`,
     );
+    if (!LOOPBACK_HOSTS.has(settings.controlHost)) {
+      logger.warn(
+        "[AstrBotQQCall] the bridge listens beyond loopback; keep its port off the internet",
+      );
+    }
   } catch (error) {
     state.listenerError = error?.message ?? String(error);
-    logger.error(`[MaiBotQQCall] bridge startup failed: ${state.listenerError}`);
+    logger.error(`[AstrBotQQCall] bridge startup failed: ${state.listenerError}`);
   }
-  ctx.router.get("/maibot-qq-call/status", (_req, res) => {
+  ctx.router.get("/astrbot-qq-call/status", (_req, res) => {
     res.json({ code: 0, data: publicStatus() });
   });
 };
@@ -588,6 +822,12 @@ export const plugin_cleanup = async () => {
   if (acceptTimer) clearTimeout(acceptTimer);
   loginTimer = null;
   acceptTimer = null;
+  if (streamTimer) clearInterval(streamTimer);
+  streamTimer = null;
+  for (const socket of streamClients) socket.destroy();
+  streamClients.clear();
+  lastStreamedCall = "";
+  stopAudio();
   if (controlServer) {
     await new Promise((resolve) => controlServer.close(resolve));
     controlServer = null;
@@ -596,7 +836,7 @@ export const plugin_cleanup = async () => {
     try {
       avsdkService.removeKernelAVSDKListener(listenerId);
     } catch (error) {
-      logger?.warn(`[MaiBotQQCall] listener cleanup failed: ${error?.message ?? String(error)}`);
+      logger?.warn(`[AstrBotQQCall] listener cleanup failed: ${error?.message ?? String(error)}`);
     }
   }
   settings = null;

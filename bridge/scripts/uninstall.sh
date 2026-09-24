@@ -13,15 +13,15 @@ elif [[ $# -gt 0 ]]; then
   exit 2
 fi
 if [[ -z $qq_dir || -z $napcat_dir ]]; then
-  printf 'QQ or NapCat path is unavailable; set MAIBOT_QQ_CALL_QQ_DIR and MAIBOT_QQ_CALL_NAPCAT_DIR\n' >&2
+  printf 'QQ or NapCat path is unavailable; set ASTRBOT_QQ_CALL_QQ_DIR and ASTRBOT_QQ_CALL_NAPCAT_DIR\n' >&2
   exit 1
 fi
 
 loader_path="$qq_dir/resources/app/loadNapCat.js"
-backup_path="$qq_dir/resources/app/loadNapCat.maibot-qq-call.backup.cjs"
-plugin_dir="$napcat_dir/plugins/napcat-plugin-maibot-qq-voice-call"
+backup_path="$qq_dir/resources/app/loadNapCat.astrbot-qq-call.backup.cjs"
+plugin_dir="$napcat_dir/plugins/napcat-plugin-astrbot-qq-voice-call"
 
-if [[ -f "$loader_path" ]] && grep -q 'MAIBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path"; then
+if [[ -f "$loader_path" ]] && grep -q 'ASTRBOT_QQ_CALL_LOADER_HOOK_V1' "$loader_path"; then
   [[ -f "$backup_path" ]] || {
     printf 'cannot restore QQ loader because its backup is missing\n' >&2
     exit 1
@@ -44,7 +44,7 @@ fi
 if [[ $purge -eq 1 ]]; then
   resolved_bridge_dir=$(readlink -f -- "$bridge_dir")
   case "$resolved_bridge_dir" in
-    */maibot-qq-voice-call)
+    */astrbot-qq-voice-call)
       if [[ ! -f "$resolved_bridge_dir/runtime/qq-dir" || \
         ! -f "$resolved_bridge_dir/av-host/host.cjs" ]]; then
         printf 'refusing to purge a directory without bridge installation markers: %s\n' \

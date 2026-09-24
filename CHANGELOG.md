@@ -7,6 +7,31 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-24
+
+### Changed
+
+- Ported from MaiBot to AstrBot (Codex fork): calls run on AstrBot's shared
+  Codex realtime voice session (full duplex, barge-in, a voice agent thread
+  with the caller's private-chat tools and memories) instead of chained
+  DashScope ASR, LLM and TTS.
+- Renamed every `MAIBOT_QQ_CALL_*` variable, device, path and NapCat plugin
+  name to `ASTRBOT_QQ_CALL_*` / `astrbot_qq_*` / `astrbot-qq-*`.
+- The bridge control port may listen beyond loopback for AstrBot in another
+  container; the AV host stays on loopback.
+
+### Added
+
+- `/v1/stream` WebSocket on the bridge: call state as text frames, call audio
+  as 48 kHz PCM both ways.
+- `qq_voice_call` LLM tool and `/v1/calls/dial` / `/v1/calls/hangup` on the
+  bridge (501 until the AVSDK commands for outgoing calls are known).
+
+### Removed
+
+- DashScope ASR/TTS providers, local VAD, MaiBot memory write-back and the
+  MaiBot SDK plugin.
+
 ## [0.3.4] - 2026-08-03
 
 ### Added

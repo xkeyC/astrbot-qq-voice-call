@@ -1,0 +1,55 @@
+{
+  "bridge_url": {
+    "description": "通话桥地址",
+    "type": "string",
+    "default": "http://127.0.0.1:6110",
+    "hint": "NapCat AV 桥的 HTTP 地址；跨容器时填桥所在容器的地址，桥需设置 ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0"
+  },
+  "bridge_token": {
+    "description": "通话桥 Token",
+    "type": "string",
+    "default": "",
+    "hint": "安装桥时生成的 Token（runtime/control.token 的内容）；与下一项二选一"
+  },
+  "bridge_token_file": {
+    "description": "通话桥 Token 文件",
+    "type": "string",
+    "default": "",
+    "hint": "Token 文件路径（AstrBot 能读到的路径）"
+  },
+  "platform_id": {
+    "description": "配套的 QQ 平台 ID",
+    "type": "string",
+    "default": "",
+    "hint": "通话配套到该 aiocqhttp 平台上来电者的私聊（工具、权限、记忆）；留空则用第一个 aiocqhttp 平台"
+  },
+  "voice_name": {
+    "description": "电话里的名字",
+    "type": "string",
+    "default": "AstrBot"
+  },
+  "voice": {
+    "description": "音色",
+    "type": "string",
+    "default": "",
+    "hint": "Codex 实时语音音色：juniper、maple、spruce、ember、vale、breeze、arbor、sol、cove；留空用默认"
+  },
+  "voice_model": {
+    "description": "实时语音模型",
+    "type": "string",
+    "default": "",
+    "hint": "留空用 Codex 默认"
+  },
+  "voice_prompt": {
+    "description": "附加提示词",
+    "type": "text",
+    "default": "",
+    "hint": "追加给实时语音模型，例如人设、说话风格"
+  },
+  "agent_instructions": {
+    "description": "后台 Agent 指令",
+    "type": "text",
+    "default": "",
+    "hint": "替换语音 Agent 线程的默认基础指令；留空用默认"
+  }
+}

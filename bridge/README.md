@@ -1,7 +1,7 @@
 # QQ AV Bridge
 
-该目录提供 MaiBot QQ Voice Call 所需的公开桥接源码。它把 QQ 内部 AVSDK
-事件限制在两个本地进程之间，只向 MaiBot 暴露最小通话状态和两个 PulseAudio
+该目录提供 AstrBot QQ Voice Call 所需的公开桥接源码。它把 QQ 内部 AVSDK
+事件限制在两个本地进程之间，只向 AstrBot 暴露最小通话状态和两个 PulseAudio
 设备。
 
 ## 组件
@@ -13,7 +13,7 @@
 - `scripts/`：安装、卸载、诊断、隔离 PulseAudio 和两个进程的启动脚本。
 - `tests/`：验证原生 Accept 参数映射、敏感字段脱敏和配置边界。
 
-两个 HTTP 服务共享至少 32 字节的 Bearer Token，而且拒绝非回环监听地址。
+两个 HTTP 服务共享至少 32 字节的 Bearer Token。AV Host 只监听回环地址；NapCat 插件的控制端口默认也只监听回环地址，可以通过 `ASTRBOT_QQ_CALL_BRIDGE_HOST` 改为容器网络地址。
 未鉴权的 `/healthz` 只返回 `{ "ok": true }`，不包含运行状态。
 
 ## 安装
@@ -40,13 +40,13 @@ sudo apt-get install pulseaudio pulseaudio-utils xvfb curl
 
 可用 `--install-dir` 修改默认安装位置。对应环境变量为：
 
-- `MAIBOT_QQ_CALL_BRIDGE_DIR`
-- `MAIBOT_QQ_CALL_NAPCAT_DIR`
-- `MAIBOT_QQ_CALL_QQ_DIR`
-- `MAIBOT_QQ_CALL_AVSDK_PATH`
-- `MAIBOT_QQ_CALL_BRIDGE_TOKEN` 或 `MAIBOT_QQ_CALL_BRIDGE_TOKEN_FILE`
-- `MAIBOT_QQ_CALL_BRIDGE_HOST` / `MAIBOT_QQ_CALL_BRIDGE_PORT`
-- `MAIBOT_QQ_CALL_AV_HOST_HOST` / `MAIBOT_QQ_CALL_AV_HOST_PORT`
+- `ASTRBOT_QQ_CALL_BRIDGE_DIR`
+- `ASTRBOT_QQ_CALL_NAPCAT_DIR`
+- `ASTRBOT_QQ_CALL_QQ_DIR`
+- `ASTRBOT_QQ_CALL_AVSDK_PATH`
+- `ASTRBOT_QQ_CALL_BRIDGE_TOKEN` 或 `ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE`
+- `ASTRBOT_QQ_CALL_BRIDGE_HOST` / `ASTRBOT_QQ_CALL_BRIDGE_PORT`
+- `ASTRBOT_QQ_CALL_AV_HOST_HOST` / `ASTRBOT_QQ_CALL_AV_HOST_PORT`
 
 Host 变量只接受 `127.0.0.1`、`::1` 或 `localhost`。
 
@@ -60,10 +60,10 @@ QQ 的打包 Electron 入口固定为 `resources/app/loadNapCat.js`。第二个�
 AV Host，因此安装器会：
 
 1. 校验 QQ 可执行文件、`package.json`、Loader 和 AVSDK 都位于指定目录；
-2. 把原 Loader 原样备份为 `loadNapCat.maibot-qq-call.backup.cjs`；
-3. 写入带 `MAIBOT_QQ_CALL_LOADER_HOOK_V1` 标记的最小分流代码；
+2. 把原 Loader 原样备份为 `loadNapCat.astrbot-qq-call.backup.cjs`；
+3. 写入带 `ASTRBOT_QQ_CALL_LOADER_HOOK_V1` 标记的最小分流代码；
 4. 普通 QQ 进程继续加载备份的原入口，只有设置
-   `MAIBOT_QQ_CALL_AV_HOST=1` 的第二个进程才加载 AV Host。
+   `ASTRBOT_QQ_CALL_AV_HOST=1` 的第二个进程才加载 AV Host。
 
 `uninstall.sh` 只在标记仍然匹配时恢复备份。如果 QQ 升级改写了 Loader，它会
 停止并保留备份，不会覆盖新文件。该 Hook 不绕过 QQ 鉴权，也不复制登录态。
@@ -73,27 +73,16 @@ AV Host，因此安装器会：
 推荐由服务管理器分别监管 `run-av-host.sh` 与普通 NapCat 进程。快速验证可直接：
 
 ```bash
-MAIBOT_QQ_CALL_BOT_UIN="机器人QQ号" /安装目录/scripts/run-napcat.sh
+ASTRBOT_QQ_CALL_BOT_UIN="机器人QQ号" /安装目录/scripts/run-napcat.sh
 ```
 
 脚本创建仅当前用户可访问的 PulseAudio socket，并提供：
 
-- `maibot_qq_speaker.monitor`：MaiBot 的 ASR 输入；
-- `maibot_qq_mic`：MaiBot 的 TTS 输出；
-- `maibot_qq_mic_source`：QQ 使用的默认麦克风 source。
+- `astrbot_qq_speaker.monitor`：AstrBot 的 ASR 输入；
+- `astrbot_qq_mic`：AstrBot 的 TTS 输出；
+- `astrbot_qq_mic_source`：QQ 使用的默认麦克风 source。
 
-MaiBot 配置示例：
-
-```toml
-[bridge]
-base_url = "http://127.0.0.1:6110"
-token_file = "/安装目录/runtime/control.token"
-
-[audio]
-pulse_server = "unix:/安装目录/runtime/pulse/native"
-capture_device = "maibot_qq_speaker.monitor"
-playback_device = "maibot_qq_mic"
-```
+AstrBot 插件只需要桥的地址和 Token（`bridge_url`、`bridge_token_file`），音频经 `/v1/stream` 传输，AstrBot 端不需要 PulseAudio。AstrBot 在另一个容器里时，启动桥前设置 `ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0`（或容器网络地址）。
 
 ## 诊断与升级
 

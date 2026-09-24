@@ -19,10 +19,10 @@ function port(value, fallback, name) {
 }
 
 function loadSettings(env = process.env) {
-  const bridgeDir = path.resolve(env.MAIBOT_QQ_CALL_BRIDGE_DIR || path.join(__dirname, ".."));
-  const qqDir = path.resolve(env.MAIBOT_QQ_CALL_QQ_DIR || path.join(bridgeDir, "QQ"));
-  const host = env.MAIBOT_QQ_CALL_AV_HOST_HOST || "127.0.0.1";
-  const bridgeHost = env.MAIBOT_QQ_CALL_BRIDGE_HOST || "127.0.0.1";
+  const bridgeDir = path.resolve(env.ASTRBOT_QQ_CALL_BRIDGE_DIR || path.join(__dirname, ".."));
+  const qqDir = path.resolve(env.ASTRBOT_QQ_CALL_QQ_DIR || path.join(bridgeDir, "QQ"));
+  const host = env.ASTRBOT_QQ_CALL_AV_HOST_HOST || "127.0.0.1";
+  const bridgeHost = env.ASTRBOT_QQ_CALL_BRIDGE_HOST || "127.0.0.1";
   if (!LOOPBACK_HOSTS.has(host) || !LOOPBACK_HOSTS.has(bridgeHost)) {
     throw new Error("AV host endpoints must use loopback addresses");
   }
@@ -30,15 +30,15 @@ function loadSettings(env = process.env) {
     bridgeDir,
     qqDir,
     host,
-    listenPort: port(env.MAIBOT_QQ_CALL_AV_HOST_PORT, 6111, "AV host port"),
+    listenPort: port(env.ASTRBOT_QQ_CALL_AV_HOST_PORT, 6111, "AV host port"),
     bridgeHost,
-    bridgePort: port(env.MAIBOT_QQ_CALL_BRIDGE_PORT, 6110, "bridge port"),
-    token: (env.MAIBOT_QQ_CALL_BRIDGE_TOKEN || "").trim(),
+    bridgePort: port(env.ASTRBOT_QQ_CALL_BRIDGE_PORT, 6110, "bridge port"),
+    token: (env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN || "").trim(),
     tokenFile: path.resolve(
-      env.MAIBOT_QQ_CALL_BRIDGE_TOKEN_FILE || path.join(bridgeDir, "runtime", "control.token"),
+      env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE || path.join(bridgeDir, "runtime", "control.token"),
     ),
     avsdkPath: path.resolve(
-      env.MAIBOT_QQ_CALL_AVSDK_PATH ||
+      env.ASTRBOT_QQ_CALL_AVSDK_PATH ||
         path.join(qqDir, "resources", "app", "avsdk", "libAVSDKPlugin.so"),
     ),
   };
@@ -133,7 +133,7 @@ function startControlServer() {
         }
         const invocationId = nextInvocationId++;
         const result = await avWindow?.webContents.executeJavaScript(
-          `window.maibotQQCallAVSDKInvoke(${JSON.stringify(command)},` +
+          `window.astrbotQQCallAVSDKInvoke(${JSON.stringify(command)},` +
             `${JSON.stringify(invocationId)},${JSON.stringify(params)})`,
           true,
         );
@@ -152,11 +152,11 @@ function startControlServer() {
   });
   controlServer.on("clientError", (_error, socket) => socket.destroy());
   controlServer.listen(settings.listenPort, settings.host, () => {
-    console.log(`[MaiBotQQCallAVHost] listening on ${settings.host}:${settings.listenPort}`);
+    console.log(`[AstrBotQQCallAVHost] listening on ${settings.host}:${settings.listenPort}`);
   });
 }
 
-ipcMain.on("maibot-qq-call-avsdk-state", (_event, incoming) => {
+ipcMain.on("astrbot-qq-call-avsdk-state", (_event, incoming) => {
   rendererState = {
     ...rendererState,
     ready: Boolean(incoming?.ready),
@@ -168,7 +168,7 @@ ipcMain.on("maibot-qq-call-avsdk-state", (_event, incoming) => {
   };
 });
 
-ipcMain.on("maibot-qq-call-avsdk-message", () => {
+ipcMain.on("astrbot-qq-call-avsdk-message", () => {
   rendererState = { ...rendererState, messageCount: rendererState.messageCount + 1 };
 });
 
@@ -209,7 +209,7 @@ async function forwardPluginMessage(message) {
   }
 }
 
-ipcMain.on("maibot-qq-call-avsdk-raw-message", (_event, message) => {
+ipcMain.on("astrbot-qq-call-avsdk-raw-message", (_event, message) => {
   void forwardPluginMessage(message);
 });
 
@@ -249,7 +249,7 @@ app.whenReady()
     startControlServer();
   })
   .catch((error) => {
-    console.error(`[MaiBotQQCallAVHost] startup failed: ${error?.message ?? String(error)}`);
+    console.error(`[AstrBotQQCallAVHost] startup failed: ${error?.message ?? String(error)}`);
     process.exitCode = 1;
   });
 

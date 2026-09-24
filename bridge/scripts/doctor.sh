@@ -18,21 +18,21 @@ for file in \
   "$qq_dir/resources/app/loadNapCat.js" \
   "$avsdk_path" \
   "$napcat_dir/napcat.mjs" \
-  "$napcat_dir/plugins/napcat-plugin-maibot-qq-voice-call/index.mjs" \
+  "$napcat_dir/plugins/napcat-plugin-astrbot-qq-voice-call/index.mjs" \
   "$bridge_dir/av-host/host.cjs" \
   "$token_file"; do
   if [[ -f "$file" ]]; then ok "file: $file"; else bad "missing file: $file"; fi
 done
 
 if [[ -f "$qq_dir/resources/app/loadNapCat.js" ]] && \
-  grep -q 'MAIBOT_QQ_CALL_LOADER_HOOK_V1' "$qq_dir/resources/app/loadNapCat.js"; then
+  grep -q 'ASTRBOT_QQ_CALL_LOADER_HOOK_V1' "$qq_dir/resources/app/loadNapCat.js"; then
   ok "reversible QQ loader hook"
 else
   bad "QQ loader hook is not installed"
 fi
 
 if [[ -f "$napcat_dir/config/plugins.json" ]] && \
-  grep -Eq '"napcat-plugin-maibot-qq-voice-call"[[:space:]]*:[[:space:]]*true' \
+  grep -Eq '"napcat-plugin-astrbot-qq-voice-call"[[:space:]]*:[[:space:]]*true' \
     "$napcat_dir/config/plugins.json"; then
   ok "NapCat plugin enabled"
 else
@@ -45,7 +45,7 @@ else
   bad "isolated PulseAudio server is not running"
 fi
 
-if curl -fsS "http://127.0.0.1:${MAIBOT_QQ_CALL_AV_HOST_PORT:-6111}/healthz" >/dev/null 2>&1; then
+if curl -fsS "http://127.0.0.1:${ASTRBOT_QQ_CALL_AV_HOST_PORT:-6111}/healthz" >/dev/null 2>&1; then
   ok "AV host health endpoint"
 else
   bad "AV host health endpoint"
@@ -55,7 +55,7 @@ if [[ -f "$token_file" ]]; then
   token=$(tr -d '\r\n' <"$token_file")
   if curl -fsS \
     -H "Authorization: Bearer $token" \
-    "http://127.0.0.1:${MAIBOT_QQ_CALL_BRIDGE_PORT:-6110}/v1/calls/current" \
+    "http://127.0.0.1:${ASTRBOT_QQ_CALL_BRIDGE_PORT:-6110}/v1/calls/current" \
     >/dev/null 2>&1; then
     ok "authenticated NapCat bridge endpoint"
   else

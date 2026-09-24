@@ -4,22 +4,23 @@
 
 Never commit:
 
-- model or cloud API keys
 - QQ cookies, tickets or login-state files
 - AV bridge Bearer Tokens
-- cloned-voice enrollment credentials
-- real QQ numbers or MaiBot person IDs in fixtures
+- Codex / ChatGPT credentials (`auth.json`)
+- real QQ numbers in fixtures
 
-Use `DASHSCOPE_API_KEY`, `MAIBOT_QQ_CALL_VOICE_ID` and
-`MAIBOT_QQ_CALL_BRIDGE_TOKEN` in the service environment. Rotate a credential
-immediately if it appears in a terminal transcript, issue, commit or chat.
+Keep the bridge token in a file readable only by the services that need it,
+or in `ASTRBOT_QQ_CALL_BRIDGE_TOKEN`. Rotate a credential immediately if it
+appears in a terminal transcript, issue, commit or chat.
 
 ## Network exposure
 
 The AV bridge handles sensitive QQ process state. It must:
 
-- listen only on loopback or a private Unix socket
-- require a high-entropy Bearer Token
+- listen on loopback by default, and at most on a private container network
+  when AstrBot runs elsewhere (`ASTRBOT_QQ_CALL_BRIDGE_HOST`)
+- require a high-entropy Bearer Token on every endpoint but `/healthz`,
+  including the `/v1/stream` WebSocket, which carries call audio
 - return only the fields documented in `bridge/PROTOCOL.md`
 - redact all cookies, tickets, tokens and native event payloads
 

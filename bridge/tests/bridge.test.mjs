@@ -7,6 +7,8 @@ import test from "node:test";
 
 import {
   buildAcceptParams,
+  decodeWsFrames,
+  encodeWsFrame,
   parseBridgeSettings,
   plugin_cleanup,
   plugin_init,
@@ -57,7 +59,7 @@ test("diagnostic summaries redact sensitive fields and omit string contents", ()
 });
 
 test("bridge settings load generated config and allow environment port overrides", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "maibot-qq-call-"));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "astrbot-qq-call-"));
   try {
     fs.writeFileSync(
       path.join(tempDir, "bridge-config.json"),
@@ -70,7 +72,7 @@ test("bridge settings load generated config and allow environment port overrides
       }),
     );
     const settings = parseBridgeSettings(
-      { MAIBOT_QQ_CALL_BRIDGE_PORT: "6210" },
+      { ASTRBOT_QQ_CALL_BRIDGE_PORT: "6210" },
       tempDir,
     );
     assert.equal(settings.controlPort, 6210);
@@ -82,11 +84,38 @@ test("bridge settings load generated config and allow environment port overrides
   }
 });
 
-test("bridge refuses non-loopback endpoints", () => {
+test("only the internal AV host endpoint must stay on loopback", () => {
+  const settings = parseBridgeSettings({ ASTRBOT_QQ_CALL_BRIDGE_HOST: "0.0.0.0" }, os.tmpdir());
+  assert.equal(settings.controlHost, "0.0.0.0");
+  assert.equal(settings.captureDevice, "astrbot_qq_speaker.monitor");
+  assert.equal(settings.playbackDevice, "astrbot_qq_mic");
   assert.throws(
-    () => parseBridgeSettings({ MAIBOT_QQ_CALL_BRIDGE_HOST: "0.0.0.0" }, os.tmpdir()),
+    () => parseBridgeSettings({ ASTRBOT_QQ_CALL_AV_HOST_HOST: "0.0.0.0" }, os.tmpdir()),
     /loopback/,
   );
+});
+
+test("WebSocket frames round-trip, masked or not, at every length form", () => {
+  for (const size of [0, 5, 300, 70000]) {
+    const payload = Buffer.alloc(size, 7);
+    const plain = encodeWsFrame(2, payload);
+    const masked = Buffer.from(plain);
+    // Re-encode as a masked client frame.
+    const headerLength = size < 126 ? 2 : size < 65536 ? 4 : 10;
+    const mask = Buffer.from([1, 2, 3, 4]);
+    const body = Buffer.from(payload.map((byte, i) => byte ^ mask[i % 4]));
+    masked[1] |= 0x80;
+    const clientFrame = Buffer.concat([masked.subarray(0, headerLength), mask, body]);
+    for (const frame of [plain, clientFrame]) {
+      const { frames, rest } = decodeWsFrames(Buffer.concat([frame, Buffer.from([0x82])]));
+      assert.equal(frames.length, 1);
+      assert.equal(frames[0].opcode, 2);
+      assert.ok(frames[0].payload.equals(payload));
+      assert.equal(rest.length, 1); // an incomplete next frame is kept
+    }
+  }
+  const huge = Buffer.from([0x82, 127, 0, 0, 0, 0, 1, 0, 0, 0]);
+  assert.throws(() => decodeWsFrames(huge), /too large/);
 });
 
 async function unusedLoopbackPort() {
@@ -105,16 +134,16 @@ test("NapCat lifecycle exposes only authenticated call state", async () => {
   const controlPort = await unusedLoopbackPort();
   const avPort = await unusedLoopbackPort();
   const previous = {
-    token: process.env.MAIBOT_QQ_CALL_BRIDGE_TOKEN,
-    tokenFile: process.env.MAIBOT_QQ_CALL_BRIDGE_TOKEN_FILE,
-    controlPort: process.env.MAIBOT_QQ_CALL_BRIDGE_PORT,
-    avPort: process.env.MAIBOT_QQ_CALL_AV_HOST_PORT,
+    token: process.env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN,
+    tokenFile: process.env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE,
+    controlPort: process.env.ASTRBOT_QQ_CALL_BRIDGE_PORT,
+    avPort: process.env.ASTRBOT_QQ_CALL_AV_HOST_PORT,
   };
   const token = "test-token-that-is-longer-than-thirty-two-bytes";
-  process.env.MAIBOT_QQ_CALL_BRIDGE_TOKEN = token;
-  delete process.env.MAIBOT_QQ_CALL_BRIDGE_TOKEN_FILE;
-  process.env.MAIBOT_QQ_CALL_BRIDGE_PORT = String(controlPort);
-  process.env.MAIBOT_QQ_CALL_AV_HOST_PORT = String(avPort);
+  process.env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN = token;
+  delete process.env.ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE;
+  process.env.ASTRBOT_QQ_CALL_BRIDGE_PORT = String(controlPort);
+  process.env.ASTRBOT_QQ_CALL_AV_HOST_PORT = String(avPort);
 
   let registeredListener = null;
   const service = {
@@ -151,14 +180,53 @@ test("NapCat lifecycle exposes only authenticated call state", async () => {
     assert.equal(authorized.status, 200);
     const payload = await authorized.json();
     assert.equal(payload.data.phase, "idle");
+    const dial = await fetch(`${baseUrl}/v1/calls/dial`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(dial.status, 501);
+
+    const upgrade = (auth) =>
+      new Promise((resolve, reject) => {
+        const socket = net.connect(controlPort, "127.0.0.1");
+        let data = Buffer.alloc(0);
+        socket.on("data", (chunk) => {
+          data = Buffer.concat([data, chunk]);
+          const end = data.indexOf("\r\n\r\n");
+          if (end < 0) return;
+          const status = data.subarray(0, end).toString();
+          const { frames } = decodeWsFrames(data.subarray(end + 4));
+          if (!status.includes(" 101 ") || frames.length) {
+            socket.destroy();
+            resolve({ status, frames });
+          }
+        });
+        socket.on("error", reject);
+        socket.on("end", () => resolve({ status: data.toString(), frames: [] }));
+        socket.write(
+          "GET /v1/stream HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n" +
+            "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+            (auth ? `Authorization: Bearer ${token}\r\n` : "") +
+            "\r\n",
+        );
+      });
+    const refused = await upgrade(false);
+    assert.match(refused.status, / 401 /);
+    const accepted = await upgrade(true);
+    assert.match(accepted.status, / 101 /);
+    assert.match(accepted.status, /s3pPLMBiTxaQ9kYGzzhZRbK\+xOo=/);
+    const hello = JSON.parse(accepted.frames[0].payload.toString());
+    assert.equal(hello.type, "call");
+    assert.equal(hello.call.phase, "idle");
   } finally {
     await plugin_cleanup();
     for (const [key, value] of Object.entries(previous)) {
       const envName = {
-        token: "MAIBOT_QQ_CALL_BRIDGE_TOKEN",
-        tokenFile: "MAIBOT_QQ_CALL_BRIDGE_TOKEN_FILE",
-        controlPort: "MAIBOT_QQ_CALL_BRIDGE_PORT",
-        avPort: "MAIBOT_QQ_CALL_AV_HOST_PORT",
+        token: "ASTRBOT_QQ_CALL_BRIDGE_TOKEN",
+        tokenFile: "ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE",
+        controlPort: "ASTRBOT_QQ_CALL_BRIDGE_PORT",
+        avPort: "ASTRBOT_QQ_CALL_AV_HOST_PORT",
       }[key];
       if (value === undefined) delete process.env[envName];
       else process.env[envName] = value;

@@ -16,11 +16,11 @@ write_config() {
   cat >"$config_path" <<EOF
 .nofail
 load-module module-native-protocol-unix socket=$pulse_socket auth-anonymous=1
-load-module module-null-sink sink_name=maibot_qq_speaker rate=48000 channels=2 sink_properties=device.description=MaiBot_QQ_Speaker
-load-module module-null-sink sink_name=maibot_qq_mic rate=48000 channels=2 sink_properties=device.description=MaiBot_QQ_Microphone_Feed
-load-module module-remap-source master=maibot_qq_mic.monitor source_name=maibot_qq_mic_source channels=1 source_properties=device.description=MaiBot_QQ_Microphone
-set-default-sink maibot_qq_speaker
-set-default-source maibot_qq_mic_source
+load-module module-null-sink sink_name=astrbot_qq_speaker rate=48000 channels=2 sink_properties=device.description=AstrBot_QQ_Speaker
+load-module module-null-sink sink_name=astrbot_qq_mic rate=48000 channels=2 sink_properties=device.description=AstrBot_QQ_Microphone_Feed
+load-module module-remap-source master=astrbot_qq_mic.monitor source_name=astrbot_qq_mic_source channels=1 source_properties=device.description=AstrBot_QQ_Microphone
+set-default-sink astrbot_qq_speaker
+set-default-source astrbot_qq_mic_source
 EOF
   chmod 0600 "$config_path"
 }
@@ -47,7 +47,7 @@ start_audio() {
     fi
     sleep 0.25
   done
-  printf 'MaiBot QQ call audio server did not become ready\n' >&2
+  printf 'AstrBot QQ call audio server did not become ready\n' >&2
   return 1
 }
 

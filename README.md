@@ -1,6 +1,6 @@
 # AstrBot QQ Voice Call
 
-让 AstrBot 接听和拨打 QQ 语音电话。通话由 Codex 实时语音全双工完成：边听边说、可以随时打断；遇到需要查资料或动手的事，交给后台的语音 Agent 处理。
+让 AstrBot 接听和拨打 QQ 语音电话。通话由 Codex 实时语音全双工完成：边听边说、可以随时打断；遇到需要查资料或动手的事，交给来电者私聊的 Agent 去办（以来电者本人的身份，和文字聊天共用上下文）。
 
 本项目从 [maibot-qq-voice-call](https://github.com/ClaudiaGardner/maibot-qq-voice-call)（GPL-3.0）改造而来：保留了它的 NapCat AV 桥，原来串联的 DashScope ASR → LLM → TTS 整体换成了 AstrBot 的实时语音会话（和 Mumble 平台用的是同一套）。
 
@@ -13,7 +13,7 @@
 ```text
 QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot 插件 ──WebRTC──> Codex realtime
                  │  文本帧：通话状态                         │
-                 │  二进制帧：PCM 音频（双向）                 └─ 语音 Agent 线程（配套来电者私聊的工具、权限、记忆）
+                 │  二进制帧：PCM 音频（双向）                 └─ 来电者私聊的 Agent（一轮对话，来电者本人的身份）
                  └─ PulseAudio 虚拟声卡 ⇄ QQ 的扬声器和麦克风
 ```
 
@@ -54,7 +54,7 @@ ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0 ~/.local/share/astrbot-qq-voice-call/scripts
 - `bridge_token` 或 `bridge_token_file`：桥的 Token
 - `platform_id`：配套的 aiocqhttp 平台 ID，留空就用第一个
 - `voice_name`、`voice`、`voice_prompt` 等：电话里的名字、音色和附加提示词
-- `voice_backend`：语音后端，默认 `codex_realtime`（Codex 实时语音）；改为 `minicpm_omni` 就用自己部署的 llama.cpp-omni（MiniCPM-o）服务端在本地完成对话，查询、执行等任务仍交给语音 Agent 线程（Codex）。这时还要填 `omni_url`，可选填 `omni_ref_audio`（音色克隆）、`omni_tool_filler`、`omni_asr_dir`。omni 服务端同一时间只服务一个会话，被拒时插件会挂断这通电话
+- `voice_backend`：语音后端，默认 `codex_realtime`（Codex 实时语音）；改为 `minicpm_omni` 就用自己部署的 llama.cpp-omni（MiniCPM-o）服务端在本地完成对话，查询、执行等任务仍交给来电者私聊的 Agent（Codex）。这时还要填 `omni_url`，可选填 `omni_ref_audio`（音色克隆）、`omni_tool_filler`、`omni_asr_dir`。omni 服务端同一时间只服务一个会话，被拒时插件会挂断这通电话
 
 AstrBot 这边不需要装 PulseAudio 或 parec/pacat。
 

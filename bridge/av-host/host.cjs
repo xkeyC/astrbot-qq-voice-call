@@ -30,9 +30,12 @@ function loadSettings(env = process.env) {
   // (for AstrBot elsewhere); the AV host, on the same machine, reaches it on
   // loopback unless that address is a specific one.
   const bridgeListen = env.ASTRBOT_QQ_CALL_BRIDGE_HOST || "127.0.0.1";
-  const bridgeHost =
+  // Only environment variables count here (not the NapCat plugin's
+  // bridge-config.json); brackets around an IPv6 address are dropped.
+  const bridgeHost = (
     env.ASTRBOT_QQ_CALL_BRIDGE_CONNECT_HOST ||
-    (["0.0.0.0", "::", ""].includes(bridgeListen) ? "127.0.0.1" : bridgeListen);
+    (["0.0.0.0", "::", "[::]", ""].includes(bridgeListen) ? "127.0.0.1" : bridgeListen)
+  ).replace(/^\[(.*)\]$/, "$1");
   return {
     bridgeDir,
     qqDir,

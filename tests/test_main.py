@@ -295,3 +295,26 @@ async def test_omni_backend_answers_and_dials_with_a_purpose(setup):
         lambda: len(FakeSession.instances) == 2 and FakeSession.instances[1].said
     )
     assert FakeSession.instances[1].said == ["提醒交房租"]
+
+
+@pytest.mark.asyncio
+async def test_a_voice_that_never_starts_is_given_up(setup, monkeypatch):
+    monkeypatch.setattr(plugin_main, "START_TIMEOUT", 0.2)
+    monkeypatch.setattr(FakeSession, "launch", lambda self, on_failed: None)
+    plugin, bridge = setup
+    await bridge.call(phase="connected", inviteAt="s", callerUin="6")
+    await wait_for(lambda: bridge.hangups == 1)
+    assert FakeSession.instances[0].closed_reason == "start timed out"
+
+
+@pytest.mark.asyncio
+async def test_a_reconnect_to_the_same_call_does_not_greet_again(setup):
+    plugin, bridge = setup
+    await bridge.call(phase="connected", inviteAt="g2", callerUin="7")
+    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
+    # The stream drops and comes back while the call goes on.
+    await plugin._end_call("bridge stream lost")
+    await plugin._on_call({"phase": "connected", "inviteAt": "g2", "callerUin": "7"})
+    await wait_for(lambda: len(FakeSession.instances) == 2)
+    await asyncio.sleep(0.2)
+    assert FakeSession.instances[1].said == []

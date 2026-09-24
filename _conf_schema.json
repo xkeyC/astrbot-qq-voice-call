@@ -28,7 +28,7 @@
     "type": "string",
     "default": "codex_realtime",
     "options": ["codex_realtime", "minicpm_omni"],
-    "hint": "codex_realtime：Codex 实时语音，需要 Codex 执行器登录含语音的 ChatGPT 订阅账号。minicpm_omni：自己部署的 llama.cpp-omni（MiniCPM-o）服务端，对话在本地完成，查询、执行等任务交给语音 Agent 线程（Codex）处理；服务端同一时间只服务一个会话"
+    "hint": "codex_realtime：Codex 实时语音，需要 Codex 执行器登录含语音的 ChatGPT 订阅账号。minicpm_omni：自己部署的 llama.cpp-omni（MiniCPM-o）服务端，对话在本地完成，查询、执行等任务交给来电者私聊的 Agent（Codex）处理；服务端同一时间只服务一个会话"
   },
   "media_over_tcp": {
     "description": "语音媒体走 TCP",

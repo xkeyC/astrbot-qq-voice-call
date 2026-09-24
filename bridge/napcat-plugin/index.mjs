@@ -435,7 +435,7 @@ function endCall(reason) {
 
 async function hangup(reason = "hangup") {
   const peerUid = state.call.callerUid;
-  if (["idle", "ended"].includes(state.call.phase) || !peerUid) return false;
+  if (["idle", "ended", "error"].includes(state.call.phase) || !peerUid) return false;
   // Command 10 (Close) ends a one-to-one call, answered or still ringing;
   // Quit (8) is refused for this scene. Reason 0 = QRTCSelfCloseReasonDefault.
   await invokeAVHost(10, [SCENE_FRIEND, peerUid, 0]);
@@ -793,6 +793,15 @@ export function streamTick() {
 
 function attachStream(socket, head) {
   streamClients.add(socket);
+  // A call that rang while nobody was connected is answered now.
+  if (
+    Array.isArray(activeSDKInvite) &&
+    state.call.phase === "ringing" &&
+    state.avHost.autoAcceptInviteAt !== state.call.inviteAt
+  ) {
+    state.avHost.lastError = null;
+    scheduleAccept(0);
+  }
   socket.setNoDelay(true);
   // A peer that vanished without closing is noticed by keepalive probes.
   socket.setKeepAlive(true, 10000);

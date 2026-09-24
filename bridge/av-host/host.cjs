@@ -7,7 +7,8 @@ const path = require("node:path");
 const { app, BrowserWindow, ipcMain } = require("electron");
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
-const ALLOWED_COMMANDS = new Set([1, 5, 55]);
+// Login, StartCall, Accept, Reject, Close, kernel data.
+const ALLOWED_COMMANDS = new Set([1, 4, 5, 9, 10, 55]);
 
 function port(value, fallback, name) {
   if (value === undefined || value === "") return fallback;

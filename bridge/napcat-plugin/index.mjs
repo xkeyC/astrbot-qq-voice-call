@@ -15,6 +15,15 @@ const MAX_WS_FRAME = 1024 * 1024;
 // Call audio on the stream: 16-bit little-endian mono PCM at 48 kHz, both ways.
 const PCM_ARGS = ["--raw", "--format=s16le", "--rate=48000", "--channels=1"];
 const STREAM_TICK_MS = 100;
+const MAX_AVSDK_LOGS = 50;
+// An outgoing call nobody answers is closed after this long.
+const DIAL_TIMEOUT_MS = 60000;
+// AVSDK scene of a one-to-one call with a friend (QRTC SceneFriend).
+const SCENE_FRIEND = 1;
+// AVSDK outputs that end a call: peer rejected (20018), peer cancelled the
+// invite (20019), chat closed (20022), room destroyed (20011), connect
+// timeout (20005). See the StartCall notes in bridge/PROTOCOL.md.
+const CALL_END_OUTPUTS = new Set([20018, 20019, 20022, 20011, 20005]);
 const AUDIO_RETRY_MS = 2000;
 
 let logger = null;
@@ -36,6 +45,7 @@ let lastStreamedCall = "";
 let capture = null;
 let playback = null;
 let audioRetryAt = 0;
+let dialTimer = null;
 
 const state = {
   startedAt: null,
@@ -65,6 +75,8 @@ function idleAVHost() {
     enterRoomOutputAt: null,
     lastOutputCommand: null,
     lastError: null,
+    // Recent AVSDK log lines (output 20050): they echo parsed call parameters.
+    logs: [],
   };
 }
 
@@ -80,6 +92,8 @@ function idleCall() {
     callerName: null,
     identityResolvedAt: null,
     identityError: null,
+    // True for a call this bridge placed; caller* then names the callee.
+    outgoing: false,
   };
 }
 
@@ -311,6 +325,103 @@ export function buildAcceptParams(invite) {
   return params;
 }
 
+// The JSON parameter of AVSDK command 4 (StartCall) for a voice call to a
+// friend. Keys and meanings come from libAVSDKPlugin's StartCall parser;
+// `overrides` lets a caller try other values without a new bridge release.
+export function buildStartCallParams(selfUid, peerUid, overrides = {}) {
+  return JSON.stringify({
+    scene_id: SCENE_FRIEND,
+    self_uid: selfUid,
+    relation_id: "0",
+    // Maps to app type 0 (audio only) in DavAppTypeForSubBusinessType.
+    sub_business_type: 3,
+    invite_count: 1,
+    invite_uids: [peerUid],
+    invite_reason: 0,
+    invite_original: 0,
+    audio_scene: 0,
+    use_ntrtc_dsp: false,
+    ntrtc_ai_denoise_update_model: "",
+    ...overrides,
+  });
+}
+
+async function resolveUid(uin) {
+  try {
+    const uid = await kernelCore?.apis?.UserApi?.getUidByUinV2?.(uin);
+    if (typeof uid === "string" && uid) return uid;
+  } catch {
+    // Fall through to the kernel service.
+  }
+  const result = await kernelSession?.getUixConvertService?.().getUid([uin]);
+  const uid = mapValue(result?.uidInfo, uin);
+  return typeof uid === "string" && uid ? uid : null;
+}
+
+async function dial(body) {
+  const uin = String(body?.uin ?? "").trim();
+  if (!/^[0-9]{5,12}$/.test(uin)) throw Object.assign(new Error("uin is invalid"), { status: 400 });
+  if (!["idle", "ended", "error"].includes(state.call.phase)) {
+    throw Object.assign(new Error("a call is in progress"), { status: 409 });
+  }
+  const selfUid = String(pluginContext?.core?.selfInfo?.uid ?? "");
+  if (!selfUid || !state.avHost.loginPosted) {
+    throw Object.assign(new Error("AV host is not logged in"), { status: 503 });
+  }
+  const peerUid = await resolveUid(uin);
+  if (!peerUid) throw Object.assign(new Error("no uid for this uin"), { status: 404 });
+  const overrides =
+    body?.startCall && typeof body.startCall === "object" && !Array.isArray(body.startCall)
+      ? body.startCall
+      : {};
+  const inviteAt = new Date().toISOString();
+  activeSDKInvite = null;
+  state.call = {
+    ...idleCall(),
+    phase: "dialing",
+    inviteAt,
+    callerUid: peerUid,
+    callerUin: uin,
+    outgoing: true,
+  };
+  void resolveCallerIdentity(peerUid, inviteAt);
+  await invokeAVHost(4, [buildStartCallParams(selfUid, peerUid, overrides)]);
+  if (dialTimer) clearTimeout(dialTimer);
+  dialTimer = setTimeout(() => {
+    dialTimer = null;
+    if (state.call.inviteAt === inviteAt && state.call.phase !== "connected") {
+      void hangup("no answer").catch(() => {});
+    }
+  }, DIAL_TIMEOUT_MS);
+  dialTimer.unref?.();
+  return { inviteAt, callerUid: peerUid };
+}
+
+function endCall(reason) {
+  if (dialTimer) clearTimeout(dialTimer);
+  dialTimer = null;
+  if (acceptTimer) clearTimeout(acceptTimer);
+  acceptTimer = null;
+  activeSDKInvite = null;
+  if (state.call.phase === "idle" || state.call.phase === "ended") return;
+  state.call = {
+    ...state.call,
+    phase: "ended",
+    endedAt: new Date().toISOString(),
+    endReason: reason,
+  };
+}
+
+async function hangup(reason = "hangup") {
+  const peerUid = state.call.callerUid;
+  if (["idle", "ended"].includes(state.call.phase) || !peerUid) return false;
+  // Command 10 (Close) ends a one-to-one call, answered or still ringing;
+  // Quit (8) is refused for this scene. Reason 0 = QRTCSelfCloseReasonDefault.
+  await invokeAVHost(10, [SCENE_FRIEND, peerUid, 0]);
+  endCall(reason);
+  return true;
+}
+
 function invokeAVHost(command, params, retries = 2) {
   return new Promise((resolve, reject) => {
     const encoded = Buffer.from(JSON.stringify({ command, params }));
@@ -407,15 +518,7 @@ function recordEvent(name, args) {
       inviteType: typeof args[0]?.invite_type === "number" ? args[0].invite_type : null,
     };
   } else if (lowerName === "ons2cactiontoavsdk" && typeof args[0]?.destroyReason === "number") {
-    if (acceptTimer) clearTimeout(acceptTimer);
-    acceptTimer = null;
-    activeSDKInvite = null;
-    state.call = {
-      ...state.call,
-      phase: "ended",
-      endedAt: now,
-      endReason: args[0].destroyReason,
-    };
+    endCall(args[0].destroyReason);
   }
   state.eventCount += 1;
   state.events.push({ name, at: now, args: args.map((arg) => summarizeValue(arg)) });
@@ -456,15 +559,20 @@ async function handleAVSDKOutput(body) {
   if (!Number.isInteger(command)) throw new Error("invalid AVSDK output command");
   state.avHost.outputCount += 1;
   state.avHost.lastOutputCommand = command;
-  if (
-    (command === 20050 || command === 120043) &&
-    state.avHost.loginPosted &&
-    pluginContext
-  ) {
+  // 20050 is not a login problem: it carries one AVSDK log line (LogSend),
+  // and re-logging in on it looped forever.
+  if (command === 120043 && state.avHost.loginPosted && pluginContext) {
     state.avHost.loginPosted = false;
     scheduleAVHostLogin(pluginContext, 100);
   }
-  if (command === 20001) {
+  if (command === 20050) {
+    const line = Array.isArray(value) ? value.join(" ") : String(value ?? "");
+    state.avHost.logs.push(line.slice(0, 500));
+    if (state.avHost.logs.length > MAX_AVSDK_LOGS) state.avHost.logs.shift();
+    return;
+  }
+  // 20001 carries signalling to the kernel, 20000 channel registration.
+  if (command === 20001 || command === 20000) {
     if (!Array.isArray(value) || typeof value[0] !== "number" || typeof value[1] !== "string") {
       throw new Error("invalid AVSDK network output");
     }
@@ -486,7 +594,23 @@ async function handleAVSDKOutput(body) {
     state.call.phase = Array.isArray(value) && value[0] === 0 ? "accepted" : "ringing";
   } else if (command === 20004) {
     state.avHost.enterRoomOutputAt = new Date().toISOString();
-    state.call.phase = Array.isArray(value) && value[0] === 0 ? "connected" : "ringing";
+    if (Array.isArray(value) && value[0] === 0) {
+      state.call.phase = "connected";
+      if (dialTimer) clearTimeout(dialTimer);
+      dialTimer = null;
+    } else if (!state.call.outgoing) {
+      state.call.phase = "ringing";
+    }
+  } else if ((command === 4 || command === 20007) && Array.isArray(value) && value[0] !== 0) {
+    // StartCall or the invite itself failed.
+    endCall(`${command === 4 ? "start" : "invite"} failed: ${value.slice(0, 3).join(",")}`);
+    state.call.phase = "error";
+  } else if (command === 20021 && state.call.outgoing && state.call.phase === "dialing") {
+    state.call.phase = "ringing"; // the callee's phone rings
+  } else if (command === 20020 && state.call.outgoing) {
+    state.call.phase = "accepted";
+  } else if (CALL_END_OUTPUTS.has(command)) {
+    endCall(`avsdk ${command}`);
   }
   state.avHost.lastError = null;
 }
@@ -701,12 +825,23 @@ async function startControlServer() {
     if (req.method === "GET" && url.pathname === "/v1/calls/current") {
       return sendJson(res, 200, { code: 0, data: state.call });
     }
-    if (
-      req.method === "POST" &&
-      (url.pathname === "/v1/calls/dial" || url.pathname === "/v1/calls/hangup")
-    ) {
-      // The AVSDK commands for placing and ending a call are not known yet.
-      return sendJson(res, 501, { code: -1, message: "not supported by this bridge yet" });
+    if (req.method === "POST" && url.pathname === "/v1/calls/dial") {
+      try {
+        const data = await dial(await readJsonBody(req, 64 * 1024));
+        return sendJson(res, 200, { code: 0, data });
+      } catch (error) {
+        return sendJson(res, error?.status ?? 500, {
+          code: -1,
+          message: error?.message ?? String(error),
+        });
+      }
+    }
+    if (req.method === "POST" && url.pathname === "/v1/calls/hangup") {
+      try {
+        return sendJson(res, 200, { code: 0, data: { closed: await hangup() } });
+      } catch (error) {
+        return sendJson(res, 500, { code: -1, message: error?.message ?? String(error) });
+      }
     }
     if (req.method === "POST" && url.pathname === "/v1/avsdk/output") {
       try {
@@ -824,6 +959,8 @@ export const plugin_cleanup = async () => {
   acceptTimer = null;
   if (streamTimer) clearInterval(streamTimer);
   streamTimer = null;
+  if (dialTimer) clearTimeout(dialTimer);
+  dialTimer = null;
   for (const socket of streamClients) socket.destroy();
   streamClients.clear();
   lastStreamedCall = "";

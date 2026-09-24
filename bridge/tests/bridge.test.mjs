@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   buildAcceptParams,
+  buildStartCallParams,
   decodeWsFrames,
   encodeWsFrame,
   parseBridgeSettings,
@@ -180,11 +181,26 @@ test("NapCat lifecycle exposes only authenticated call state", async () => {
     assert.equal(authorized.status, 200);
     const payload = await authorized.json();
     assert.equal(payload.data.phase, "idle");
-    const dial = await fetch(`${baseUrl}/v1/calls/dial`, {
-      method: "POST",
+    const post = (pathname, body) =>
+      fetch(`${baseUrl}${pathname}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    assert.equal((await post("/v1/calls/dial", { uin: "abc" })).status, 400);
+    // Not logged in to the AV host yet.
+    assert.equal((await post("/v1/calls/dial", { uin: "123456" })).status, 503);
+    const hangup = await post("/v1/calls/hangup", {});
+    assert.equal((await hangup.json()).data.closed, false);
+    // A log line from AVSDK is kept for diagnostics, not taken as a login problem.
+    assert.equal(
+      (await post("/v1/avsdk/output", { command: 20050, value: ["StartCall scene=1"] })).status,
+      200,
+    );
+    const status = await fetch(`${baseUrl}/v1/status`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    assert.equal(dial.status, 501);
+    assert.deepEqual((await status.json()).data.avHost.logs, ["StartCall scene=1"]);
 
     const upgrade = (auth) =>
       new Promise((resolve, reject) => {
@@ -233,4 +249,14 @@ test("NapCat lifecycle exposes only authenticated call state", async () => {
     }
   }
   assert.equal(registeredListener, null);
+});
+
+test("StartCall parameters describe a voice call to one friend", () => {
+  const params = JSON.parse(buildStartCallParams("u_self", "u_peer", { relation_id: "9" }));
+  assert.equal(params.scene_id, 1);
+  assert.equal(params.self_uid, "u_self");
+  assert.deepEqual(params.invite_uids, ["u_peer"]);
+  assert.equal(params.invite_count, 1);
+  assert.equal(params.sub_business_type, 3);
+  assert.equal(params.relation_id, "9");
 });

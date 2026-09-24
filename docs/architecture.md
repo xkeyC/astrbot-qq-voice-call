@@ -57,8 +57,9 @@ session lifecycle. The plugin only supplies audio (`PcmMedia`) and prompts.
 
 ## Outgoing calls
 
-`qq_voice_call` posts `/v1/calls/dial`, remembers the purpose, and returns at
-once. When a call with that person connects within 90 s, the purpose goes into
-the realtime prompt and the model opens with it. The bridge side is pending:
-the AVSDK commands to place and end a call still have to be captured from the
-Linux QQ client.
+`qq_voice_call` remembers the purpose, posts `/v1/calls/dial` and returns at
+once. The bridge resolves the uid and sends AVSDK command 4 (`StartCall`);
+signalling then flows through the same kernel relay as incoming calls. When
+the call connects (the bridge marks it `outgoing`), the purpose goes into the
+realtime prompt and the model opens with it. `qq_voice_hangup` and the idle
+timeout end a call with AVSDK command 10 (`Close`).

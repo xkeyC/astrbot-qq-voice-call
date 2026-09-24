@@ -16,7 +16,8 @@ QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot �
 ```
 
 - **来电**：桥自动接听。接通后插件为来电者开一个实时语音会话，bot 先开口打招呼。
-- **去电**：LLM 工具 `qq_voice_call(purpose, user_id)` 负责拨号。对方接听后，bot 根据 `purpose` 说明来意。**目前桥还不支持拨号**，这个接口会返回 501，工具会如实告诉模型，见“状态”。
+- **去电**：LLM 工具 `qq_voice_call(purpose, user_id)` 负责拨号。对方接听后，bot 根据 `purpose` 说明来意。
+- **挂断**：工具 `qq_voice_hangup`。通话里的后台 Agent 在对方道别或事情说完时调用；另外，超过 `idle_hangup_seconds`（默认 120 秒）没听到对方说话也会自动挂断。
 - **会话配套**：每通电话配套到 `<aiocqhttp 平台 ID>:FriendMessage:<QQ号>`。语音 Agent 拿到的是普通成员在这个私聊里能用的工具、审批规则和执行环境；开启记忆时，能读全局记忆和这个私聊的记忆。语音线程按来电者持久化，下次来电接着用。
 - **权限**：`qq_voice_call` 是普通插件工具，谁能用、能不能拨给别人，都由现有的工具权限规则决定。
 
@@ -26,7 +27,8 @@ QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot �
 |---|---|
 | 接听来电、全双工对话、打断 | 桥端原有实现 + 新的实时语音会话；待在 NapCat Docker 里端到端验证 |
 | WebSocket 音频/状态通道（可跨容器） | 已实现，有测试 |
-| 主动拨号 `/v1/calls/dial`、挂断 `/v1/calls/hangup` | 接口已预留（返回 501）；AVSDK 的 `startCall`/`invite` 指令还需要在 Linux QQ 上逆向 |
+| 主动拨号 `/v1/calls/dial`、挂断 `/v1/calls/hangup` | 已实现：指令和参数由静态逆向 `libAVSDKPlugin.so` 得出，**待实机验证** |
+| 本地测试镜像 `docker/Dockerfile` | NapCat + Linux QQ 3.2.30 + 桥 |
 
 ## 安装
 

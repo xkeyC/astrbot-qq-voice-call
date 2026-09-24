@@ -34,6 +34,7 @@ class FakeBridge:
     def __init__(self, dial_status: int = 200) -> None:
         self.dial_status = dial_status
         self.dialed: list[dict] = []
+        self.hangups = 0
         self.audio: list[bytes] = []
         self.ws: web.WebSocketResponse | None = None
         self.connected = asyncio.Event()
@@ -52,7 +53,16 @@ class FakeBridge:
 
     async def dial(self, request: web.Request) -> web.Response:
         self.dialed.append(await request.json())
-        return web.json_response({"code": 0}, status=self.dial_status)
+        if self.dial_status != 200:
+            return web.json_response(
+                {"code": -1, "message": "a call is in progress"},
+                status=self.dial_status,
+            )
+        return web.json_response({"code": 0})
+
+    async def hangup(self, request: web.Request) -> web.Response:
+        self.hangups += 1
+        return web.json_response({"code": 0, "data": {"closed": True}})
 
     async def call(self, **call) -> None:
         await self.ws.send_str(json.dumps({"type": "call", "call": call}))
@@ -68,6 +78,7 @@ class FakeSession:
         self.closing = False
         self.said: list[str] = []
         self.closed_reason = None
+        self.last_activity = 1e18  # never idle unless a test says so
         FakeSession.instances.append(self)
 
     def launch(self, on_failed) -> None:
@@ -120,6 +131,7 @@ async def setup(monkeypatch):
     app = web.Application()
     app.router.add_get("/v1/stream", bridge.stream)
     app.router.add_post("/v1/calls/dial", bridge.dial)
+    app.router.add_post("/v1/calls/hangup", bridge.hangup)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -180,7 +192,8 @@ async def test_dialing_then_answer_speaks_the_purpose(setup):
     result = json.loads(await plugin.qq_voice_call(FakeEvent(), purpose="提醒明天开会"))
     assert result["status"] == "dialing"
     assert bridge.dialed == [{"uin": "42"}]
-    await bridge.call(phase="connected", inviteAt="c", callerUin="42")
+    await bridge.call(phase="dialing", inviteAt="c", callerUin="42", outgoing=True)
+    await bridge.call(phase="connected", inviteAt="c", callerUin="42", outgoing=True)
     await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
     session = FakeSession.instances[0]
     assert "提醒明天开会" in session.kwargs["prompt"]
@@ -190,15 +203,28 @@ async def test_dialing_then_answer_speaks_the_purpose(setup):
 
 
 @pytest.mark.asyncio
-async def test_bridge_without_dialing_is_reported(setup):
+async def test_dial_refused_by_the_bridge_is_reported(setup):
     plugin, bridge = setup
-    bridge.dial_status = 501
+    bridge.dial_status = 409
     result = json.loads(
         await plugin.qq_voice_call(FakeEvent(), purpose="x", user_id="7")
     )
-    assert "不支持" in result["error"]
+    assert "a call is in progress" in result["error"]
     assert plugin.dialing is None
     bad = json.loads(
         await plugin.qq_voice_call(FakeEvent(), purpose="x", user_id="abc")
     )
     assert "error" in bad
+
+
+@pytest.mark.asyncio
+async def test_hangup_tool_and_idle_hangup(setup):
+    plugin, bridge = setup
+    result = json.loads(await plugin.qq_voice_hangup(FakeEvent()))
+    assert result == {"status": "hung up"}
+    assert bridge.hangups == 1
+    plugin.config["idle_hangup_seconds"] = 0.2
+    await bridge.call(phase="connected", inviteAt="d", callerUin="5")
+    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
+    FakeSession.instances[0].last_activity = 0.0
+    await wait_for(lambda: bridge.hangups == 2)

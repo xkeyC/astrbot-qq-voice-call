@@ -32,7 +32,7 @@ GET /v1/calls/current
 }
 ```
 
-`phase` 可能的值：`idle`、`ringing`、`accepting`、`accepted`、`connected`、`ended`、`error`。只有 `connected` 表示 AVSDK 已经进入房间，可以收发音频。`inviteAt` 用来区分每一通电话。对于去电，`callerUin` 和 `callerName` 指的是对方。
+`phase` 可能的值：`idle`、`dialing`（去电已发出）、`ringing`、`accepting`、`accepted`、`connected`、`ended`、`error`。只有 `connected` 表示 AVSDK 已经进入房间，可以收发音频。`inviteAt` 用来区分每一通电话。去电时 `outgoing` 为 `true`，`callerUin`、`callerName` 指的是对方。
 
 ## 通话流
 
@@ -51,11 +51,16 @@ GET /v1/stream   (WebSocket)
 ## 拨号与挂断
 
 ```http
-POST /v1/calls/dial     {"uin": "123456789"}
+POST /v1/calls/dial     {"uin": "123456789", "startCall": {...可选覆盖...}}
 POST /v1/calls/hangup
 ```
 
-目前都返回 `501`：AVSDK 发起和结束通话的指令还没有逆向出来。实现后，拨号成功返回 `200`，接下来的通话状态照常通过通话流推送。
+- **拨号**：把 QQ 号转换成 uid 后，调用 AVSDK 指令 4（`StartCall`），参数是一个 JSON 字符串。接下来的状态依次为 `dialing` →（对方响铃）`ringing` → `accepted` → `connected`，或者变为 `ended`/`error`。60 秒内没有接通就自动挂断。可能的错误码：`400`（QQ 号不合法）、`409`（已经在通话）、`503`（AV Host 还没登录）、`404`（查不到 uid）。
+- **挂断**：调用 AVSDK 指令 10（`Close`），参数为 `[1, 对方 uid, 0]`，响铃中的去电和已接通的通话都能挂断。返回 `{"closed": true|false}`。
+
+以下 `StartCall` 的字段来自对 `libAVSDKPlugin.so` 的静态分析（QQ Linux 3.2.30），**还没有经过实机验证**，所以允许用 `startCall` 字段覆盖：`scene_id` 1（好友）、`self_uid`、`invite_uids` 与 `invite_count`、`relation_id` `"0"`、`sub_business_type` 3（纯语音）、`invite_reason` 0、`invite_original` 0、`audio_scene` 0、`use_ntrtc_dsp` false、`ntrtc_ai_denoise_update_model` ""。AVSDK 的日志行（输出 20050）会保存在 `GET /v1/status` 的 `avHost.logs` 里，其中会回显它解析到的 StartCall 和来电参数，排查时看这里。
+
+AVSDK 用来判断去电状态的输出：`4` 是 StartCall 结果；`20007` 是邀请的应答；`20021` 表示对方开始响铃；`20020` 表示对方接听；`20004` 表示已进房；`20018`、`20019`、`20022`、`20011`、`20005` 都表示通话结束（依次为拒接、对方取消、通话关闭、房间销毁、连接超时）。
 
 ## 音频设备
 

@@ -46,6 +46,12 @@
     "default": "",
     "hint": "追加给实时语音模型，例如人设、说话风格"
   },
+  "idle_hangup_seconds": {
+    "description": "空闲自动挂断（秒）",
+    "type": "int",
+    "default": 120,
+    "hint": "通话中这么久没听到对方说话就挂断"
+  },
   "agent_instructions": {
     "description": "后台 Agent 指令",
     "type": "text",

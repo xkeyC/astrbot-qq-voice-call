@@ -24,8 +24,18 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - `/v1/stream` WebSocket on the bridge: call state as text frames, call audio
   as 48 kHz PCM both ways.
-- `qq_voice_call` LLM tool and `/v1/calls/dial` / `/v1/calls/hangup` on the
-  bridge (501 until the AVSDK commands for outgoing calls are known).
+- Outgoing calls: `/v1/calls/dial` (AVSDK `StartCall`, command 4) and
+  `/v1/calls/hangup` (`Close`, command 10) on the bridge, from static analysis
+  of `libAVSDKPlugin.so`; `qq_voice_call` and `qq_voice_hangup` LLM tools; idle
+  calls hang up after `idle_hangup_seconds`.
+- `docker/Dockerfile`: NapCat, Linux QQ and the bridge in one image.
+
+### Fixed
+
+- The bridge no longer logs in to the AV host again on every AVSDK log line
+  (output 20050), which looped forever; the lines are kept in
+  `/v1/status` instead. Output 20000 (channel registration) is now forwarded
+  to the kernel like 20001.
 
 ### Removed
 

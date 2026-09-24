@@ -40,6 +40,7 @@ IDENTITY_WAIT = 3.0
 # How long an outgoing call may take to be answered before it is forgotten.
 DIAL_TIMEOUT = 90.0
 READY_WAIT = 20.0
+IDLE_HANGUP_SECONDS = 120.0
 
 
 class QQVoiceCallPlugin(Star):
@@ -161,10 +162,14 @@ class QQVoiceCallPlugin(Star):
             logger.error("QQ voice call: no aiocqhttp platform to pair calls with")
             return
         dialing = self.dialing
-        outgoing = (
-            dialing is not None
+        outgoing = bool(self.call.get("outgoing"))
+        purpose = (
+            dialing["purpose"]
+            if outgoing
+            and dialing is not None
             and dialing["uin"] == uin
             and time.monotonic() - dialing["at"] < DIAL_TIMEOUT
+            else ""
         )
         self.dialing = None
         caller = str(self.call.get("callerName") or uin)
@@ -178,7 +183,7 @@ class QQVoiceCallPlugin(Star):
         )
         prompt = CALL_PROMPT.format(name=options.name, caller=caller)
         if outgoing:
-            prompt += "\n\n" + OUTGOING_PROMPT.format(purpose=dialing["purpose"])
+            prompt += "\n\n" + OUTGOING_PROMPT.format(purpose=purpose or "not given")
         prompt += "\n\n" + time_prompt()
         if options.extra_prompt:
             prompt += "\n\n" + options.extra_prompt
@@ -210,8 +215,30 @@ class QQVoiceCallPlugin(Star):
             if time.monotonic() > deadline:
                 return
             await asyncio.sleep(0.1)
-        if not session.closing:
-            await session.say(DIAL_CUE if outgoing else ANSWER_CUE)
+        if session.closing:
+            return
+        await session.say(DIAL_CUE if outgoing else ANSWER_CUE)
+        # Hang up a call nobody speaks in any more (a forgotten line).
+        idle = float(self.config.get("idle_hangup_seconds") or IDLE_HANGUP_SECONDS)
+        while self.session is session and not session.closing:
+            if time.monotonic() - session.last_activity > idle:
+                logger.info("QQ voice call with %s idle, hanging up", uin)
+                await self._hangup()
+                return
+            await asyncio.sleep(1.0)
+
+    async def _hangup(self) -> dict:
+        """Asks the bridge to end the call in progress; returns its answer."""
+        assert self._http is not None
+        async with self._http.post(
+            self._base_url() + "/v1/calls/hangup",
+            headers=self._headers(),
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            body = await resp.json(content_type=None)
+            if resp.status >= 300:
+                raise RuntimeError(body.get("message") or f"HTTP {resp.status}")
+            return body.get("data") or {}
 
     async def _end_call(self, reason: str) -> None:
         session, self.session = self.session, None
@@ -258,6 +285,8 @@ class QQVoiceCallPlugin(Star):
             "error",
         ):
             return json.dumps({"error": "正在通话中，稍后再拨"}, ensure_ascii=False)
+        # Set before dialing: the call may connect before the answer arrives.
+        self.dialing = {"uin": uin, "purpose": purpose, "at": time.monotonic()}
         try:
             async with self._http.post(
                 self._base_url() + "/v1/calls/dial",
@@ -266,20 +295,28 @@ class QQVoiceCallPlugin(Star):
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
                 body = await resp.json(content_type=None)
-                if resp.status == 501:
-                    return json.dumps(
-                        {"error": "当前的 QQ 通话桥还不支持主动拨号"},
-                        ensure_ascii=False,
-                    )
                 if resp.status >= 300:
+                    self.dialing = None
                     return json.dumps(
                         {"error": f"拨号失败: {body.get('message') or resp.status}"},
                         ensure_ascii=False,
                     )
         except Exception as exc:  # noqa: BLE001 - reported to the model
+            self.dialing = None
             return json.dumps({"error": f"拨号失败: {exc}"}, ensure_ascii=False)
-        self.dialing = {"uin": uin, "purpose": purpose, "at": time.monotonic()}
         return json.dumps(
             {"status": "dialing", "user_id": uin, "note": "接通后会在电话里说明来意"},
             ensure_ascii=False,
         )
+
+    @llm_tool("qq_voice_hangup")
+    async def qq_voice_hangup(self, event: AstrMessageEvent) -> str:
+        """挂断当前的 QQ 语音电话。通话中对方道别、说要挂了，或者事情已经说完时调用。"""
+        if self._http is None:
+            return json.dumps({"error": "QQ 通话桥未连接"}, ensure_ascii=False)
+        try:
+            data = await self._hangup()
+        except Exception as exc:  # noqa: BLE001 - reported to the model
+            return json.dumps({"error": f"挂断失败: {exc}"}, ensure_ascii=False)
+        status = "hung up" if data.get("closed") else "no call in progress"
+        return json.dumps({"status": status}, ensure_ascii=False)

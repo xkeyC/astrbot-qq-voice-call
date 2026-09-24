@@ -50,8 +50,9 @@ DIAL_TIMEOUT = 90.0
 # The bridge may take a while to dial (uid lookup, AV host round trips).
 DIAL_REQUEST_TIMEOUT = 30.0
 IDLE_HANGUP_SECONDS = 120.0
-# A voice session not listening by then is given up and the call hung up (a
-# first omni session loads its models, within the server's 120 s).
+# A voice session not listening by then is given up and the call hung up. (A
+# first omni use may download its models for longer: that goes on after the
+# give-up, and the next call finds them.)
 START_TIMEOUT = 150.0
 # Attempts, and the pause between them, to end a call the bridge failed to.
 HANGUP_ATTEMPTS = 3
@@ -370,6 +371,10 @@ class QQVoiceCallPlugin(Star):
         close); its queued audio is dropped."""
         session, self.session = self.session, None
         self.session_invite = ""
+        if session is not None:
+            # Its audio stops now, not when the close gets to it: nothing of
+            # it may reach the next call.
+            session.media.stop()
         while not self._out.empty():
             self._out.get_nowait()
         return session

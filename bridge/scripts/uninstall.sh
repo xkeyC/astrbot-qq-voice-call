@@ -32,6 +32,10 @@ elif [[ -e "$backup_path" ]]; then
   exit 1
 fi
 
+if [[ -f "$napcat_dir/napcat.mjs" ]]; then
+  "${PYTHON_BIN:-python3}" "$script_dir/napcat-whitelist.py" remove "$napcat_dir/napcat.mjs"
+fi
+
 if [[ -d "$plugin_dir" ]]; then
   rm -f -- \
     "$plugin_dir/index.mjs" \

@@ -160,6 +160,7 @@ EOF
 fi
 
 if [[ ! -w "$loader_path" || ! -w "$qq_app_dir" || ! -w "$napcat_dir/plugins" || \
+  ! -w "$napcat_dir/napcat.mjs" || ! -w "$napcat_dir" || \
   ( -e "$plugins_config" && ! -w "$plugins_config" ) || \
   ( ! -e "$plugins_config" && ! -w "$napcat_dir/config" ) ]]; then
   printf 'QQ Loader, NapCat plugin, or config path is not writable; rerun with suitable permissions\n' >&2
@@ -173,7 +174,8 @@ install -d -m 0750 \
 install -d -m 0700 "$install_dir/runtime"
 install -m 0644 "$bridge_source/av-host/host.cjs" "$install_dir/av-host/host.cjs"
 install -m 0644 "$bridge_source/av-host/host.html" "$install_dir/av-host/host.html"
-install -m 0755 "$bridge_source"/scripts/*.sh "$install_dir/scripts/"
+install -m 0755 "$bridge_source"/scripts/*.sh "$bridge_source"/scripts/*.py \
+  "$install_dir/scripts/"
 install -m 0644 "$bridge_source/napcat-plugin/index.mjs" "$plugin_dir/index.mjs"
 install -m 0644 "$bridge_source/napcat-plugin/package.json" "$plugin_dir/package.json"
 
@@ -208,6 +210,8 @@ cat >"$plugin_dir/bridge-config.json" <<EOF
 }
 EOF
 chmod 0600 "$plugin_dir/bridge-config.json"
+
+"$python_bin" "$bridge_source/scripts/napcat-whitelist.py" add "$napcat_dir/napcat.mjs"
 
 "$python_bin" - "$plugins_config" <<'PY'
 import json

@@ -7,9 +7,12 @@ FROM mlikiowa/napcat-docker:latest
 
 # linuxqq is installed with --force-depends upstream and lacks xdg-utils; apt
 # refuses any other package until that dependency is installed on its own.
+# The call engine (avsdk/*.so) also needs pulse, EGL, OpenGL and Xft
+# libraries that the NapCat image leaves out.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends xdg-utils \
     && apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils \
+       libpulse-mainloop-glib0 libegl1 libopengl0 libxft2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY bridge /opt/astrbot-qq-voice-call/bridge

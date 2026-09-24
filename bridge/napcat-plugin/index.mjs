@@ -149,6 +149,9 @@ export function parseBridgeSettings(env = process.env, pluginDir = PLUGIN_DIR) {
       "astrbot_qq_speaker.monitor",
     playbackDevice:
       env.ASTRBOT_QQ_CALL_PLAYBACK_DEVICE || fileConfig.playbackDevice || "astrbot_qq_mic",
+    // Keep AVSDK log lines (they contain uids and call parameters) in
+    // /v1/status for debugging.
+    keepAvsdkLogs: env.ASTRBOT_QQ_CALL_AVSDK_LOGS === "1",
   };
 }
 
@@ -282,18 +285,24 @@ async function resolveCallerIdentity(uid, inviteAt) {
   if (state.call.inviteAt !== inviteAt || state.call.callerUid !== uid) return;
   state.call = {
     ...state.call,
-    callerUin: uin,
-    callerName: firstString(
-      profile?.remark,
-      profile?.displayName,
-      profile?.nick,
-      profile?.nickname,
-      profile?.coreInfo?.remark,
-      profile?.coreInfo?.nick,
-      profile?.simpleInfo?.coreInfo?.nick,
-    ),
+    // An outgoing call knows the callee's uin already: a failed lookup must
+    // not erase it.
+    callerUin: uin ?? state.call.callerUin,
+    callerName:
+      firstString(
+        profile?.remark,
+        profile?.displayName,
+        profile?.nick,
+        profile?.nickname,
+        profile?.coreInfo?.remark,
+        profile?.coreInfo?.nick,
+        profile?.simpleInfo?.coreInfo?.nick,
+      ) ?? state.call.callerName,
     identityResolvedAt: new Date().toISOString(),
-    identityError: uin ? null : errors.join("; ") || "caller identity lookup returned empty",
+    identityError:
+      uin || state.call.callerUin
+        ? null
+        : errors.join("; ") || "caller identity lookup returned empty",
   };
 }
 
@@ -370,6 +379,10 @@ async function dial(body) {
   }
   const peerUid = await resolveUid(uin);
   if (!peerUid) throw Object.assign(new Error("no uid for this uin"), { status: 404 });
+  // A call may have come in during the lookup.
+  if (!["idle", "ended", "error"].includes(state.call.phase)) {
+    throw Object.assign(new Error("a call is in progress"), { status: 409 });
+  }
   const overrides =
     body?.startCall && typeof body.startCall === "object" && !Array.isArray(body.startCall)
       ? body.startCall
@@ -385,7 +398,15 @@ async function dial(body) {
     outgoing: true,
   };
   void resolveCallerIdentity(peerUid, inviteAt);
-  await invokeAVHost(4, [buildStartCallParams(selfUid, peerUid, overrides)]);
+  try {
+    await invokeAVHost(4, [buildStartCallParams(selfUid, peerUid, overrides)]);
+  } catch (error) {
+    if (state.call.inviteAt === inviteAt) {
+      endCall(`start failed: ${error?.message ?? String(error)}`);
+      state.call.phase = "error";
+    }
+    throw error;
+  }
   if (dialTimer) clearTimeout(dialTimer);
   dialTimer = setTimeout(() => {
     dialTimer = null;
@@ -448,7 +469,9 @@ function invokeAVHost(command, params, retries = 2) {
     );
     request.on("timeout", () => request.destroy(new Error("AV host timeout")));
     request.on("error", (error) => {
-      if (retries > 0) {
+      // Only a refused connection proves the command never ran: a timed-out
+      // StartCall or Close may have, and must not be sent twice.
+      if (retries > 0 && error?.code === "ECONNREFUSED") {
         setTimeout(() => invokeAVHost(command, params, retries - 1).then(resolve, reject), 250);
       } else reject(error);
     });
@@ -458,6 +481,11 @@ function invokeAVHost(command, params, retries = 2) {
 
 async function acceptActiveInvite() {
   if (!Array.isArray(activeSDKInvite) || state.call.phase === "ended") return;
+  if (streamClients.size === 0) {
+    // Nobody would talk: answering would only give the caller silence.
+    state.avHost.lastError = "incoming call not answered: AstrBot is not connected";
+    return;
+  }
   const inviteAt = state.call.inviteAt;
   if (!inviteAt || state.avHost.autoAcceptInviteAt === inviteAt) return;
   state.avHost.autoAcceptInviteAt = inviteAt;
@@ -566,6 +594,8 @@ async function handleAVSDKOutput(body) {
     scheduleAVHostLogin(pluginContext, 100);
   }
   if (command === 20050) {
+    // Log lines echo uids and parsed call parameters: kept only on request.
+    if (!settings.keepAvsdkLogs) return;
     const line = Array.isArray(value) ? value.join(" ") : String(value ?? "");
     state.avHost.logs.push(line.slice(0, 500));
     if (state.avHost.logs.length > MAX_AVSDK_LOGS) state.avHost.logs.shift();
@@ -669,9 +699,19 @@ export function decodeWsFrames(buffer) {
   return { frames, rest };
 }
 
+// A client this far behind has stopped reading (a dead peer, a stuck
+// process): it is dropped instead of queueing audio in QQ's memory.
+const MAX_CLIENT_BACKLOG = 1024 * 1024;
+
 function broadcast(frame) {
   for (const socket of streamClients) {
-    if (!socket.destroyed) socket.write(frame);
+    if (socket.destroyed) continue;
+    if (socket.writableLength > MAX_CLIENT_BACKLOG) {
+      streamClients.delete(socket);
+      socket.destroy();
+      continue;
+    }
+    socket.write(frame);
   }
 }
 
@@ -715,16 +755,19 @@ function startAudio() {
   );
   playbackChild.stdin.on("error", () => {});
   for (const child of [captureChild, playbackChild]) {
-    child.on("error", (error) => {
-      state.stream.audioError = `${child.spawnfile}: ${error?.message ?? String(error)}`;
-    });
-    child.on("exit", (code) => {
+    const failed = (reason) => {
       if (capture === child || playback === child) {
-        state.stream.audioError ??= `${child.spawnfile} exited with ${code}`;
+        state.stream.audioError ??= `${child.spawnfile} ${reason}`;
         audioRetryAt = Date.now() + AUDIO_RETRY_MS;
         stopAudio();
       }
+    };
+    // A child that cannot be spawned emits "error" and never "exit".
+    child.on("error", (error) => {
+      state.stream.audioError = `${child.spawnfile}: ${error?.message ?? String(error)}`;
+      failed("failed to start");
     });
+    child.on("exit", (code) => failed(`exited with ${code}`));
     child.stderr.on("data", (chunk) => {
       state.stream.audioError = `${child.spawnfile}: ${String(chunk).trim().slice(0, 300)}`;
     });
@@ -751,6 +794,8 @@ export function streamTick() {
 function attachStream(socket, head) {
   streamClients.add(socket);
   socket.setNoDelay(true);
+  // A peer that vanished without closing is noticed by keepalive probes.
+  socket.setKeepAlive(true, 10000);
   socket.write(
     encodeWsFrame(1, Buffer.from(JSON.stringify({ type: "call", call: state.call }))),
   );
@@ -856,6 +901,9 @@ async function startControlServer() {
   });
   controlServer.on("clientError", (_error, socket) => socket.destroy());
   controlServer.on("upgrade", (req, socket, head) => {
+    // Node drops its own error handler from upgraded sockets: without this, a
+    // client resetting the connection would crash the QQ process.
+    socket.on("error", () => socket.destroy());
     const url = new URL(req.url ?? "/", `http://${settings.controlHost}:${settings.controlPort}`);
     const key = req.headers["sec-websocket-key"];
     if (

@@ -58,7 +58,7 @@ POST /v1/calls/hangup
 - **拨号**：把 QQ 号转换成 uid 后，调用 AVSDK 指令 4（`StartCall`），参数是一个 JSON 字符串。接下来的状态依次为 `dialing` →（对方响铃）`ringing` → `accepted` → `connected`，或者变为 `ended`/`error`。60 秒内没有接通就自动挂断。可能的错误码：`400`（QQ 号不合法）、`409`（已经在通话）、`503`（AV Host 还没登录）、`404`（查不到 uid）。
 - **挂断**：调用 AVSDK 指令 10（`Close`），参数为 `[1, 对方 uid, 0]`，响铃中的去电和已接通的通话都能挂断。返回 `{"closed": true|false}`。
 
-以下 `StartCall` 的字段来自对 `libAVSDKPlugin.so` 的静态分析（QQ Linux 3.2.30），**还没有经过实机验证**，所以允许用 `startCall` 字段覆盖：`scene_id` 1（好友）、`self_uid`、`invite_uids` 与 `invite_count`、`relation_id` `"0"`、`sub_business_type` 3（纯语音）、`invite_reason` 0、`invite_original` 0、`audio_scene` 0、`use_ntrtc_dsp` false、`ntrtc_ai_denoise_update_model` ""。AVSDK 的日志行（输出 20050）会保存在 `GET /v1/status` 的 `avHost.logs` 里，其中会回显它解析到的 StartCall 和来电参数，排查时看这里。
+以下 `StartCall` 的字段来自对 `libAVSDKPlugin.so` 的静态分析（QQ Linux 3.2.30），**还没有经过实机验证**，所以允许用 `startCall` 字段覆盖：`scene_id` 1（好友）、`self_uid`、`invite_uids` 与 `invite_count`、`relation_id` `"0"`、`sub_business_type` 3（纯语音）、`invite_reason` 0、`invite_original` 0、`audio_scene` 0、`use_ntrtc_dsp` false、`ntrtc_ai_denoise_update_model` ""。设置 `ASTRBOT_QQ_CALL_AVSDK_LOGS=1` 后，AVSDK 的日志行（输出 20050）会保存在 `GET /v1/status` 的 `avHost.logs` 里，其中会回显它解析到的 StartCall 和来电参数，排查时看这里；默认不保存（含 uid）。
 
 AVSDK 用来判断去电状态的输出：`4` 是 StartCall 结果；`20007` 是邀请的应答；`20021` 表示对方开始响铃；`20020` 表示对方接听；`20004` 表示已进房；`20018`、`20019`、`20022`、`20011`、`20005` 都表示通话结束（依次为拒接、对方取消、通话关闭、房间销毁、连接超时）。
 
@@ -68,7 +68,9 @@ AVSDK 用来判断去电状态的输出：`4` 是 StartCall 结果；`20007` 是
 - bot 的声音由桥播放到 sink `astrbot_qq_mic`，QQ 把 `astrbot_qq_mic_source` 当作麦克风。
 - 设备名可以用 `ASTRBOT_QQ_CALL_CAPTURE_DEVICE`、`ASTRBOT_QQ_CALL_PLAYBACK_DEVICE` 覆盖。
 
-桥不会向 AstrBot 返回鉴权票据、QQ Cookie、登录态、Native 指针或 AVSDK 原始事件载荷。
+桥不会向 AstrBot 返回鉴权票据、QQ Cookie、登录态、Native 指针或 AVSDK 原始事件载荷（调试开关打开时的日志行除外，见上）。
+
+没有客户端连在 `/v1/stream` 上时，桥不自动接听来电。
 
 ## 兼容性
 

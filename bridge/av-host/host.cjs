@@ -23,10 +23,16 @@ function loadSettings(env = process.env) {
   const bridgeDir = path.resolve(env.ASTRBOT_QQ_CALL_BRIDGE_DIR || path.join(__dirname, ".."));
   const qqDir = path.resolve(env.ASTRBOT_QQ_CALL_QQ_DIR || path.join(bridgeDir, "QQ"));
   const host = env.ASTRBOT_QQ_CALL_AV_HOST_HOST || "127.0.0.1";
-  const bridgeHost = env.ASTRBOT_QQ_CALL_BRIDGE_HOST || "127.0.0.1";
-  if (!LOOPBACK_HOSTS.has(host) || !LOOPBACK_HOSTS.has(bridgeHost)) {
-    throw new Error("AV host endpoints must use loopback addresses");
+  if (!LOOPBACK_HOSTS.has(host)) {
+    throw new Error("the AV host must listen on a loopback address");
   }
+  // The bridge's listen address may be a wildcard or a container address
+  // (for AstrBot elsewhere); the AV host, on the same machine, reaches it on
+  // loopback unless that address is a specific one.
+  const bridgeListen = env.ASTRBOT_QQ_CALL_BRIDGE_HOST || "127.0.0.1";
+  const bridgeHost =
+    env.ASTRBOT_QQ_CALL_BRIDGE_CONNECT_HOST ||
+    (["0.0.0.0", "::", ""].includes(bridgeListen) ? "127.0.0.1" : bridgeListen);
   return {
     bridgeDir,
     qqDir,
@@ -184,7 +190,7 @@ async function forwardPluginMessage(message) {
   }
   try {
     const response = await fetch(
-      `http://${settings.bridgeHost}:${settings.bridgePort}/v1/avsdk/output`,
+      `http://${settings.bridgeHost.includes(":") ? `[${settings.bridgeHost}]` : settings.bridgeHost}:${settings.bridgePort}/v1/avsdk/output`,
       {
         method: "POST",
         headers: {

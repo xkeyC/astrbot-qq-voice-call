@@ -1,8 +1,8 @@
 # QQ AV Bridge
 
 该目录提供 AstrBot QQ Voice Call 所需的公开桥接源码。它把 QQ 内部 AVSDK
-事件限制在两个本地进程之间，只向 AstrBot 暴露最小通话状态和两个 PulseAudio
-设备。
+事件限制在两个本地进程之间，只向 AstrBot 暴露通话状态、拨号/挂断接口，以及
+经 WebSocket `/v1/stream` 传输的通话音频（见 [`PROTOCOL.md`](PROTOCOL.md)）。
 
 ## 组件
 
@@ -45,10 +45,18 @@ sudo apt-get install pulseaudio pulseaudio-utils xvfb curl
 - `ASTRBOT_QQ_CALL_QQ_DIR`
 - `ASTRBOT_QQ_CALL_AVSDK_PATH`
 - `ASTRBOT_QQ_CALL_BRIDGE_TOKEN` 或 `ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE`
-- `ASTRBOT_QQ_CALL_BRIDGE_HOST` / `ASTRBOT_QQ_CALL_BRIDGE_PORT`
+- `ASTRBOT_QQ_CALL_BRIDGE_HOST` / `ASTRBOT_QQ_CALL_BRIDGE_PORT`：桥的监听地址和端口
+- `ASTRBOT_QQ_CALL_BRIDGE_CONNECT_HOST`：可选，AV Host 回连桥用的地址（默认：监听地址是
+  `0.0.0.0`/`::` 时用 `127.0.0.1`，否则用监听地址）
 - `ASTRBOT_QQ_CALL_AV_HOST_HOST` / `ASTRBOT_QQ_CALL_AV_HOST_PORT`
+- `ASTRBOT_QQ_CALL_AVSDK_LOGS=1`：把 AVSDK 日志行保存在 `/v1/status` 里，排查拨号时用
+  （日志里有 uid 和通话参数，默认不保存）
 
-Host 变量只接受 `127.0.0.1`、`::1` 或 `localhost`。
+AV Host 只能监听 `127.0.0.1`、`::1` 或 `localhost`。桥的监听地址默认也是回环地址；
+AstrBot 在另一个容器里时可以改成 `0.0.0.0` 或容器地址，所有接口（`/healthz` 除外）
+仍然要求 Token，不要把端口暴露到公网。
+
+AstrBot 没有连上 `/v1/stream` 时，桥不会自动接听来电（接了对方也只能听到静音）。
 
 如果 QQ Loader 已被旧的 AV Host 集成改写，安装器会拒绝叠加 Hook。请先找到
 升级前保存的干净 Loader，用 `--original-loader /path/to/clean-loader.js` 明确

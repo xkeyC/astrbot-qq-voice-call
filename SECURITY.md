@@ -22,7 +22,9 @@ The AV bridge handles sensitive QQ process state. It must:
 - require a high-entropy Bearer Token on every endpoint but `/healthz`,
   including the `/v1/stream` WebSocket, which carries call audio
 - return only the fields documented in `bridge/PROTOCOL.md`
-- redact all cookies, tickets, tokens and native event payloads
+- redact all cookies, tickets, tokens and native event payloads; AVSDK log
+  lines (which carry uids and call parameters) are kept in `/v1/status` only
+  when `ASTRBOT_QQ_CALL_AVSDK_LOGS=1` is set for debugging
 
 Do not expose the bridge through a reverse proxy or public firewall rule.
 

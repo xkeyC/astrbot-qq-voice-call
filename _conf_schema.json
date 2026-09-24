@@ -3,7 +3,7 @@
     "description": "通话桥地址",
     "type": "string",
     "default": "http://127.0.0.1:6110",
-    "hint": "NapCat AV 桥的 HTTP 地址；跨容器时填桥所在容器的地址，桥需设置 ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0"
+    "hint": "NapCat AV 桥的 HTTP 地址；跨容器时填桥所在容器的地址，桥需设置 ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0（桥的 Docker 镜像默认如此）"
   },
   "bridge_token": {
     "description": "通话桥 Token",

@@ -45,8 +45,12 @@ CONNECT_TIMEOUT = 15.0
 IDENTITY_WAIT = 3.0
 # How long an outgoing call may take to be answered before it is forgotten.
 DIAL_TIMEOUT = 90.0
-READY_WAIT = 20.0
+# The bridge may take a while to dial (uid lookup, AV host round trips).
+DIAL_REQUEST_TIMEOUT = 30.0
 IDLE_HANGUP_SECONDS = 120.0
+# Attempts, and the pause between them, to end a call the bridge failed to.
+HANGUP_ATTEMPTS = 3
+HANGUP_RETRY_SECONDS = 10.0
 # Upper bound of the bot's speech queued ahead with Codex realtime.
 REALTIME_BUFFER = 3.0
 
@@ -168,11 +172,13 @@ class QQVoiceCallPlugin(Star):
             return
         uin = str(self.call.get("callerUin") or "")
         if not uin:
-            logger.warning("QQ voice call: caller unknown, the call is not answered")
+            # The bridge answered already: a silent line helps nobody.
+            await self._hang_up_call(invite, "caller unknown")
             return
         platform_id = self._platform_id()
         if not platform_id:
             logger.error("QQ voice call: no aiocqhttp platform to pair calls with")
+            await self._hang_up_call(invite, "no aiocqhttp platform")
             return
         dialing = self.dialing
         outgoing = bool(self.call.get("outgoing"))
@@ -233,6 +239,13 @@ class QQVoiceCallPlugin(Star):
         def closed(session) -> None:
             if self.session is session:
                 self.session = None
+            # The session failed or ended on its own (realtime closed, WebRTC
+            # failed, the omni server refused it) while the call is still up:
+            # end the call rather than leave a silent line. A call ending first
+            # clears session_invite before closing the session; the invite is
+            # kept here so the same call does not get a new session.
+            if self.session_invite == invite:
+                self._spawn(self._hang_up_call(invite, "voice session ended"))
 
         session = (omni.OmniVoiceSession if local else VoiceSession)(
             **backend,
@@ -248,6 +261,9 @@ class QQVoiceCallPlugin(Star):
                 buffer_seconds=omni.PLAYOUT_BUFFER_SECONDS
                 if local
                 else REALTIME_BUFFER,
+                # A realtime peer sends silence all along: skipping it while a
+                # backlog exists keeps a stall from adding lasting latency.
+                trim_silence=not local,
             ),
             on_closed=closed,
             # The caller's private chat: its member tools and memories.
@@ -261,22 +277,49 @@ class QQVoiceCallPlugin(Star):
         logger.info(
             "QQ voice call %s %s (%s)", "to" if outgoing else "from", caller, uin
         )
-        deadline = time.monotonic() + READY_WAIT
+        # The session has its own timeouts (a first omni session loads the
+        # models); a failed start closes it, and closing hangs up.
         while not session.ready and not session.closing:
-            if time.monotonic() > deadline:
-                return
             await asyncio.sleep(0.1)
         if session.closing:
             return
-        await session.say(opening)
+        try:
+            await session.say(opening)
+        except RuntimeError as exc:  # closed in the meantime
+            logger.info("QQ voice call with %s: no opening: %s", uin, exc)
         # Hang up a call nobody speaks in any more (a forgotten line).
         idle = float(self.config.get("idle_hangup_seconds") or IDLE_HANGUP_SECONDS)
         while self.session is session and not session.closing:
             if time.monotonic() - session.last_activity > idle:
                 logger.info("QQ voice call with %s idle, hanging up", uin)
-                await self._hangup()
+                await self._hang_up_call(invite, "idle")
                 return
             await asyncio.sleep(1.0)
+
+    async def _hang_up_call(self, invite: str, reason: str) -> None:
+        """Ends the call ``invite`` at the bridge if it is still the call there.
+
+        Args:
+            invite: The call's ``inviteAt``.
+            reason: Why, for the log.
+        """
+        if str(self.call.get("inviteAt") or "") != invite or self.call.get("phase") in (
+            "idle",
+            "ended",
+            "error",
+        ):
+            return
+        logger.info("QQ voice call %s: hanging up (%s)", invite, reason)
+        for attempt in range(HANGUP_ATTEMPTS):
+            try:
+                await self._hangup()
+                return
+            except Exception as exc:  # noqa: BLE001 - logged and retried
+                logger.warning("QQ voice call %s: hang-up failed: %s", invite, exc)
+            if attempt + 1 < HANGUP_ATTEMPTS:
+                await asyncio.sleep(HANGUP_RETRY_SECONDS)
+            if str(self.call.get("inviteAt") or "") != invite:
+                return
 
     async def _hangup(self) -> dict:
         """Asks the bridge to end the call in progress; returns its answer."""
@@ -308,9 +351,14 @@ class QQVoiceCallPlugin(Star):
         return ""
 
     def _spawn(self, coro) -> None:
+        def done(task: asyncio.Task) -> None:
+            self._tasks.discard(task)
+            if not task.cancelled() and (exc := task.exception()) is not None:
+                logger.error("QQ voice call task failed: %s", exc, exc_info=exc)
+
         task = asyncio.create_task(coro)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(done)
 
     # -- tools --------------------------------------------------------------
 
@@ -343,7 +391,7 @@ class QQVoiceCallPlugin(Star):
                 self._base_url() + "/v1/calls/dial",
                 json={"uin": uin},
                 headers=self._headers(),
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=DIAL_REQUEST_TIMEOUT),
             ) as resp:
                 body = await resp.json(content_type=None)
                 if resp.status >= 300:

@@ -188,12 +188,29 @@ async def test_incoming_call_becomes_a_voice_session(setup):
 
 
 @pytest.mark.asyncio
-async def test_unknown_caller_is_not_answered(setup, monkeypatch):
+async def test_unknown_caller_is_hung_up(setup, monkeypatch):
     monkeypatch.setattr(plugin_main, "IDENTITY_WAIT", 0.1)
     plugin, bridge = setup
     await bridge.call(phase="connected", inviteAt="b")
-    await asyncio.sleep(0.3)
+    await wait_for(lambda: bridge.hangups == 1)
     assert FakeSession.instances == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_ending_on_its_own_hangs_up_once(setup):
+    plugin, bridge = setup
+    await bridge.call(phase="connected", inviteAt="h", callerUin="3")
+    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
+    session = FakeSession.instances[0]
+    await session.close("realtime closed")  # e.g. WebRTC failed
+    await wait_for(lambda: bridge.hangups == 1)
+    # The same call reported again does not get a new session.
+    await bridge.call(phase="connected", inviteAt="h", callerUin="3", callerName="x")
+    await asyncio.sleep(0.2)
+    assert len(FakeSession.instances) == 1
+    await bridge.call(phase="ended", inviteAt="h", callerUin="3")
+    await asyncio.sleep(0.1)
+    assert bridge.hangups == 1
 
 
 @pytest.mark.asyncio

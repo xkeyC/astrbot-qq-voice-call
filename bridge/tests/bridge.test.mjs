@@ -192,7 +192,8 @@ test("NapCat lifecycle exposes only authenticated call state", async () => {
     assert.equal((await post("/v1/calls/dial", { uin: "123456" })).status, 503);
     const hangup = await post("/v1/calls/hangup", {});
     assert.equal((await hangup.json()).data.closed, false);
-    // A log line from AVSDK is kept for diagnostics, not taken as a login problem.
+    // An AVSDK log line is not a login problem, and is kept only on request
+    // (it carries uids).
     assert.equal(
       (await post("/v1/avsdk/output", { command: 20050, value: ["StartCall scene=1"] })).status,
       200,
@@ -200,7 +201,7 @@ test("NapCat lifecycle exposes only authenticated call state", async () => {
     const status = await fetch(`${baseUrl}/v1/status`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    assert.deepEqual((await status.json()).data.avHost.logs, ["StartCall scene=1"]);
+    assert.deepEqual((await status.json()).data.avHost.logs, []);
 
     const upgrade = (auth) =>
       new Promise((resolve, reject) => {

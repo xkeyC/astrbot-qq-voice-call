@@ -49,8 +49,12 @@ sudo apt-get install pulseaudio pulseaudio-utils xvfb curl
 - `ASTRBOT_QQ_CALL_BRIDGE_CONNECT_HOST`：可选，AV Host 回连桥用的地址（默认：监听地址是
   `0.0.0.0`/`::` 时用 `127.0.0.1`，否则用监听地址）
 - `ASTRBOT_QQ_CALL_AV_HOST_HOST` / `ASTRBOT_QQ_CALL_AV_HOST_PORT`
-- `ASTRBOT_QQ_CALL_AVSDK_LOGS=1`：把 AVSDK 日志行保存在 `/v1/status` 里，排查拨号时用
-  （日志里有 uid 和通话参数，默认不保存）
+- `ASTRBOT_QQ_CALL_AVSDK_LOGS=1`：调试模式，逆向和排查用（记录里有 uid 和通话参数，默认关闭）。
+  AVSDK 日志行保存在 `/v1/status` 里；另有 `GET /v1/debug?since=<ISO 时间>`（AVSDK 原始输出、
+  内核事件、发出的指令）、`POST /v1/debug/clear`、`POST /v1/debug/invoke`
+  （`{"command", "params"}`，任意 AVSDK 指令）和 `POST /v1/debug/kernel`
+  （`{"service" 或 "api", "method", "args"}`，调用 NapCat 内核服务方法；不给 `method` 时列出方法）。
+  这些接口同样要求 Token
 
 AV Host 只能监听 `127.0.0.1`、`::1` 或 `localhost`。桥的监听地址默认也是回环地址；
 AstrBot 在另一个容器里时可以改成 `0.0.0.0` 或容器地址，所有接口（`/healthz` 除外）

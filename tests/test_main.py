@@ -180,6 +180,25 @@ async def test_incoming_call_becomes_a_voice_session(setup):
 
 
 @pytest.mark.asyncio
+async def test_a_group_call_runs_in_the_group_chat_as_the_voice_user(
+    setup, monkeypatch
+):
+    monkeypatch.setattr(plugin_main, "IDENTITY_WAIT", 0.1)
+    plugin, bridge = setup
+    # The inviter's QQ number may not be known: a group call still goes on.
+    await bridge.call(phase="connected", inviteAt="g", scene=3, groupId="971962939")
+    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
+    session = FakeSession.instances[0]
+    chat = session.kwargs["chat"]
+    assert chat.umo == "qq1:GroupMessage:971962939"
+    assert not chat.private
+    assert session.kwargs["scope_id"] == "qq1:voice:group:971962939"
+    assert "group voice call" in session.kwargs["prompt"]
+    assert session.said == [plugin_main.GROUP_CUE]
+    assert bridge.hangups == 0
+
+
+@pytest.mark.asyncio
 async def test_unknown_caller_is_hung_up(setup, monkeypatch):
     monkeypatch.setattr(plugin_main, "IDENTITY_WAIT", 0.1)
     plugin, bridge = setup

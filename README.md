@@ -19,6 +19,7 @@ QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot �
 
 - **来电**：桥自动接听。接通后插件为来电者开一个实时语音会话，bot 先开口打招呼。
 - **去电**：LLM 工具 `qq_voice_call(purpose, user_id)` 负责拨号。对方接听后，bot 根据 `purpose` 说明来意。
+- **群通话**：被邀请进群语音通话时，bot 也会自动加入。电话里交给后台的事作为该群聊（`<aiocqhttp 平台 ID>:GroupMessage:<群号>`）的一轮对话执行，身份是固定的“语音用户”（member 权限，分不清是谁在说话）；bot 只在被叫到名字时开口。`qq_voice_hangup` 在群通话里是退出通话，其他人继续；其他人都离开后 bot 也会退出。
 - **挂断**：工具 `qq_voice_hangup`。通话里的后台 Agent 在对方道别或事情说完时调用；另外，超过 `idle_hangup_seconds`（默认 120 秒）没听到对方说话也会自动挂断。
 - **和私聊共享 Agent**：电话里交给后台的事，作为来电者私聊（`<aiocqhttp 平台 ID>:FriendMessage:<QQ号>`）的一轮对话来执行，**以来电者本人的身份和权限**（管理员打来就是管理员）。上下文、人格、工具、记忆和审批都和文字聊天是同一套；文字消息和语音请求互相排队，聊天正忙时 bot 会先口头说一声。回答只念出来，不会在聊天里发文字。
 - **权限**：`qq_voice_call` 是普通插件工具，谁能用、能不能拨给别人，都由现有的工具权限规则决定。
@@ -28,6 +29,7 @@ QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot �
 | 功能 | 状态 |
 |---|---|
 | 接听来电、全双工对话、打断 | 已在 NapCat Docker 里用真实 QQ 来电验证 |
+| 群通话：受邀加入、对话、退出 | 已用真实群通话验证 |
 | WebSocket 音频/状态通道（可跨容器） | 已实现，有测试 |
 | 主动拨号 `/v1/calls/dial`、挂断 `/v1/calls/hangup` | 已实现：指令和参数由静态逆向 `libAVSDKPlugin.so` 得出，**待实机验证** |
 | 本地测试镜像 `docker/Dockerfile` | 基于 `mlikiowa/napcat-docker`，补齐 pulseaudio 与 AVSDK 依赖库并装好桥 |

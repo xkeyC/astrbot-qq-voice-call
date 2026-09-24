@@ -135,7 +135,9 @@ function startControlServer() {
         const body = await readJsonBody(req);
         const command = Number(body?.command);
         const params = body?.params;
-        if (!ALLOWED_COMMANDS.has(command)) {
+        // Debug mode (see the bridge) may send any command.
+        const debugMode = process.env.ASTRBOT_QQ_CALL_AVSDK_LOGS === "1";
+        if (!ALLOWED_COMMANDS.has(command) && !(debugMode && Number.isInteger(command))) {
           return sendJson(res, 400, { code: -1, message: "command is not allowed" });
         }
         if (!Array.isArray(params) || params.length > 16) {

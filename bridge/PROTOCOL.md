@@ -32,6 +32,8 @@ GET /v1/calls/current
 }
 ```
 
+群通话还带 `scene`（`3`；一对一为 `1`）和 `groupId`（群号），`caller*` 指邀请 bot 的人。
+
 `phase` 可能的值：`idle`、`dialing`（去电已发出）、`ringing`、`accepting`、`accepted`、`connected`、`ended`、`error`。只有 `connected` 表示 AVSDK 已经进入房间，可以收发音频。`inviteAt` 用来区分每一通电话。去电时 `outgoing` 为 `true`，`callerUin`、`callerName` 指的是对方。
 
 ## 通话流
@@ -56,7 +58,11 @@ POST /v1/calls/hangup
 ```
 
 - **拨号**：把 QQ 号转换成 uid 后，调用 AVSDK 指令 4（`StartCall`），参数是一个 JSON 字符串。接下来的状态依次为 `dialing` →（对方响铃）`ringing` → `accepted` → `connected`，或者变为 `ended`/`error`。60 秒内没有接通就自动挂断。可能的错误码：`400`（QQ 号不合法）、`409`（已经在通话）、`503`（AV Host 还没登录）、`404`（查不到 uid）。
-- **挂断**：调用 AVSDK 指令 10（`Close`），参数为 `[1, 对方 uid, 0]`，响铃中的去电和已接通的通话都能挂断。返回 `{"closed": true|false}`。
+- **挂断**：一对一通话调用 AVSDK 指令 10（`Close`），参数为 `[1, 对方 uid, 0]`，响铃中的去电和已接通的通话都能挂断；群通话调用指令 8（`Quit`），参数为 `[3, 0]`，只有 bot 退出，其他人继续（用 `Close` 只会断开音频，账号仍留在通话里）。返回 `{"closed": true|false}`。
+
+群通话里，AVSDK 报告 bot 自己离开房间（输出 20009 `[0, uid, …]`）或房间出错（20003）时，通话结束，桥会补发一次 `Quit`，否则 AVSDK 会忽略下一次邀请。其他人都离开（20008 进房、20009 离房）后，bot 也会退出。
+
+AV Host 登录（指令 1）的参数为 `[uid, QQ 号, 替代 uid, 数据目录, 机器 id]`。替代 uid 必须留空：AVSDK 用它作为进房身份，填成 QQ 号时，群通话里会多出一个不认识的成员 “0”。
 
 以下 `StartCall` 的字段来自对 `libAVSDKPlugin.so` 的静态分析（QQ Linux 3.2.30），**还没有经过实机验证**，所以允许用 `startCall` 字段覆盖：`scene_id` 1（好友）、`self_uid`、`invite_uids` 与 `invite_count`、`relation_id` `"0"`、`sub_business_type` 3（纯语音）、`invite_reason` 0、`invite_original` 0、`audio_scene` 0、`use_ntrtc_dsp` false、`ntrtc_ai_denoise_update_model` ""。设置 `ASTRBOT_QQ_CALL_AVSDK_LOGS=1` 后，AVSDK 的日志行（输出 20050）会保存在 `GET /v1/status` 的 `avHost.logs` 里，其中会回显它解析到的 StartCall 和来电参数，排查时看这里；默认不保存（含 uid）。
 

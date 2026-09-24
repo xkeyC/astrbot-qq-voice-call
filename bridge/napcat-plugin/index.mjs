@@ -16,10 +16,17 @@ const MAX_WS_FRAME = 1024 * 1024;
 const PCM_ARGS = ["--raw", "--format=s16le", "--rate=48000", "--channels=1"];
 const STREAM_TICK_MS = 100;
 const MAX_AVSDK_LOGS = 50;
+// Debug mode (ASTRBOT_QQ_CALL_AVSDK_LOGS=1) keeps more: raw AVSDK outputs,
+// kernel events and the commands sent, for reverse engineering call flows.
+const MAX_DEBUG_LOGS = 2000;
+const MAX_DEBUG_ENTRIES = 500;
+const MAX_DEBUG_TEXT = 4000;
 // An outgoing call nobody answers is closed after this long.
 const DIAL_TIMEOUT_MS = 60000;
 // AVSDK scene of a one-to-one call with a friend (QRTC SceneFriend).
 const SCENE_FRIEND = 1;
+// AVSDK scene of a group call (invite[0] of a group invitation).
+const SCENE_GROUP = 3;
 // AVSDK outputs that end a call: peer rejected (20018), peer cancelled the
 // invite (20019), chat closed (20022), room destroyed (20011), connect
 // timeout (20005). See the StartCall notes in bridge/PROTOCOL.md.
@@ -60,6 +67,24 @@ const state = {
   call: idleCall(),
   stream: { clients: 0, audio: false, audioError: null },
 };
+const debug = { outputs: [], kernel: [], invokes: [] };
+
+function debugText(value) {
+  try {
+    const text = JSON.stringify(value, (_key, item) =>
+      typeof item === "bigint" ? item.toString() : item,
+    );
+    return text === undefined ? String(value) : text.slice(0, MAX_DEBUG_TEXT);
+  } catch (error) {
+    return `<unserializable: ${error?.message ?? String(error)}>`;
+  }
+}
+
+function debugRecord(list, entry) {
+  if (!settings?.keepAvsdkLogs) return;
+  list.push({ at: new Date().toISOString(), ...entry });
+  if (list.length > MAX_DEBUG_ENTRIES) list.shift();
+}
 
 function idleAVHost() {
   return {
@@ -94,7 +119,19 @@ function idleCall() {
     identityError: null,
     // True for a call this bridge placed; caller* then names the callee.
     outgoing: false,
+    // AVSDK scene: 1 one-to-one, 3 group call (caller* is who invited).
+    scene: null,
+    // The group of a group call.
+    groupId: null,
   };
+}
+
+// Others in the room of a group call (uids): the account leaves once the
+// last of them has.
+let roomPeers = new Set();
+
+function selfUid() {
+  return String(pluginContext?.core?.selfInfo?.uid ?? "");
 }
 
 function integerSetting(value, fallback, name) {
@@ -396,6 +433,7 @@ async function dial(body) {
     callerUid: peerUid,
     callerUin: uin,
     outgoing: true,
+    scene: SCENE_FRIEND,
   };
   void resolveCallerIdentity(peerUid, inviteAt);
   try {
@@ -419,6 +457,7 @@ async function dial(body) {
 }
 
 function endCall(reason) {
+  roomPeers = new Set();
   if (dialTimer) clearTimeout(dialTimer);
   dialTimer = null;
   if (acceptTimer) clearTimeout(acceptTimer);
@@ -436,14 +475,29 @@ function endCall(reason) {
 async function hangup(reason = "hangup") {
   const peerUid = state.call.callerUid;
   if (["idle", "ended", "error"].includes(state.call.phase) || !peerUid) return false;
-  // Command 10 (Close) ends a one-to-one call, answered or still ringing;
-  // Quit (8) is refused for this scene. Reason 0 = QRTCSelfCloseReasonDefault.
-  await invokeAVHost(10, [SCENE_FRIEND, peerUid, 0]);
+  if (state.call.scene === SCENE_GROUP) {
+    // Leaving a group call is Quit (8); Close would only drop the media and
+    // leave the account in the call. The call goes on for the others.
+    await invokeAVHost(8, [SCENE_GROUP, 0]);
+  } else {
+    // Command 10 (Close) ends a one-to-one call, answered or still ringing;
+    // Quit (8) is refused for this scene. Reason 0 = QRTCSelfCloseReasonDefault.
+    await invokeAVHost(10, [SCENE_FRIEND, peerUid, 0]);
+  }
   endCall(reason);
   return true;
 }
 
+// A group call that ended without our Quit (the room was closed, the account
+// removed) still leaves AVSDK in it: it would ignore the next invitation.
+function leaveGroupCall() {
+  void invokeAVHost(8, [SCENE_GROUP, 0]).catch((error) => {
+    state.avHost.lastError = `group call cleanup failed: ${error?.message ?? String(error)}`;
+  });
+}
+
 function invokeAVHost(command, params, retries = 2) {
+  debugRecord(debug.invokes, { command, params: debugText(params) });
   return new Promise((resolve, reject) => {
     const encoded = Buffer.from(JSON.stringify({ command, params }));
     const request = http.request(
@@ -536,6 +590,7 @@ function recordEvent(name, args) {
   const lowerName = name.toLowerCase();
   if (lowerName === "oninviteactiontoavsdk") {
     activeSDKInvite = null;
+    roomPeers = new Set();
     state.avHost.autoAcceptAttemptedAt = null;
     state.avHost.autoAcceptInviteAt = null;
     state.avHost.autoAcceptPostedAt = null;
@@ -551,6 +606,7 @@ function recordEvent(name, args) {
   state.eventCount += 1;
   state.events.push({ name, at: now, args: args.map((arg) => summarizeValue(arg)) });
   if (state.events.length > MAX_EVENTS) state.events.shift();
+  debugRecord(debug.kernel, { name, args: debugText(args) });
   forwardKernelAction(name, args);
 }
 
@@ -587,6 +643,7 @@ async function handleAVSDKOutput(body) {
   if (!Number.isInteger(command)) throw new Error("invalid AVSDK output command");
   state.avHost.outputCount += 1;
   state.avHost.lastOutputCommand = command;
+  if (command !== 20050) debugRecord(debug.outputs, { command, value: debugText(value) });
   // 20050 is not a login problem: it carries one AVSDK log line (LogSend),
   // and re-logging in on it looped forever.
   if (command === 120043 && state.avHost.loginPosted && pluginContext) {
@@ -598,7 +655,7 @@ async function handleAVSDKOutput(body) {
     if (!settings.keepAvsdkLogs) return;
     const line = Array.isArray(value) ? value.join(" ") : String(value ?? "");
     state.avHost.logs.push(line.slice(0, 500));
-    if (state.avHost.logs.length > MAX_AVSDK_LOGS) state.avHost.logs.shift();
+    if (state.avHost.logs.length > MAX_DEBUG_LOGS) state.avHost.logs.shift();
     return;
   }
   // 20001 carries signalling to the kernel, 20000 channel registration.
@@ -615,7 +672,17 @@ async function handleAVSDKOutput(body) {
   } else if (command === 20006 && Array.isArray(value)) {
     activeSDKInvite = value;
     const callerUid = typeof value[1] === "string" ? value[1] : null;
-    state.call = { ...state.call, callerUid, callerUin: null, callerName: null };
+    // [scene, inviter uid, [invitees], count, relation id (the group of a
+    // group call), ...]
+    const scene = Number.isInteger(value[0]) ? value[0] : null;
+    state.call = {
+      ...state.call,
+      callerUid,
+      callerUin: null,
+      callerName: null,
+      scene,
+      groupId: scene === SCENE_GROUP && typeof value[4] === "string" ? value[4] : null,
+    };
     state.avHost.inviteCallbackSeen = true;
     if (callerUid) void resolveCallerIdentity(callerUid, state.call.inviteAt);
     scheduleAccept(500);
@@ -641,8 +708,44 @@ async function handleAVSDKOutput(body) {
     state.call.phase = "accepted";
   } else if (CALL_END_OUTPUTS.has(command)) {
     endCall(`avsdk ${command}`);
+  } else if (
+    state.call.scene === SCENE_GROUP &&
+    command === 20008 &&
+    Array.isArray(value) &&
+    typeof value[0] === "string" &&
+    value[0] !== selfUid()
+  ) {
+    roomPeers.add(value[0]); // [uid, ...]: someone is in the room
+  } else if (
+    state.call.scene === SCENE_GROUP &&
+    command === 20009 &&
+    Array.isArray(value) &&
+    roomPeers.delete(value[1]) &&
+    roomPeers.size === 0 &&
+    state.call.phase === "connected"
+  ) {
+    // Everyone else left: nobody to talk to.
+    void hangup("everyone left").catch((error) => {
+      state.avHost.lastError = `group call leave failed: ${error?.message ?? String(error)}`;
+    });
+  } else if (state.call.scene === SCENE_GROUP && isGroupCallEnd(command, value)) {
+    // The account left the group call (removed, the call closed) or could
+    // not stay in it.
+    if (!["idle", "ended", "error"].includes(state.call.phase)) {
+      endCall(`avsdk ${command}`);
+      leaveGroupCall();
+    }
   }
   state.avHost.lastError = null;
+}
+
+// 20009 [result, uid, ...] is someone leaving the room (for a group call,
+// this account's own leaving ends it); 20003 [scene, relation id, message]
+// is a room error.
+function isGroupCallEnd(command, value) {
+  if (command === 20003) return true;
+  const self = selfUid();
+  return command === 20009 && Array.isArray(value) && Boolean(self) && value[1] === self;
 }
 
 export function encodeWsFrame(opcode, payload) {
@@ -845,6 +948,55 @@ function attachStream(socket, head) {
   if (head?.length) onData(head);
 }
 
+// Debug only: dumps what was recorded, sends any AVSDK command, or calls a
+// kernel service method, so call flows can be probed on a live call.
+async function handleDebug(req, url) {
+  if (req.method === "GET" && url.pathname === "/v1/debug") {
+    const since = url.searchParams.get("since") ?? "";
+    const after = (list) => list.filter((entry) => entry.at > since);
+    return {
+      call: state.call,
+      activeInvite: debugText(activeSDKInvite),
+      outputs: after(debug.outputs),
+      kernel: after(debug.kernel),
+      invokes: after(debug.invokes),
+      logs: state.avHost.logs,
+    };
+  }
+  if (req.method === "POST" && url.pathname === "/v1/debug/clear") {
+    debug.outputs.length = 0;
+    debug.kernel.length = 0;
+    debug.invokes.length = 0;
+    state.avHost.logs.length = 0;
+    return { cleared: true };
+  }
+  const body = req.method === "POST" ? await readJsonBody(req, 256 * 1024) : {};
+  if (url.pathname === "/v1/debug/invoke") {
+    if (!Number.isInteger(body?.command) || !Array.isArray(body?.params)) {
+      throw Object.assign(new Error("command and params are required"), { status: 400 });
+    }
+    await invokeAVHost(body.command, body.params, 0);
+    return { posted: true };
+  }
+  if (url.pathname === "/v1/debug/kernel") {
+    // {"service": "getAVSDKService", "method": "...", "args": [...]}, or
+    // {"api": "UserApi", ...} for NapCat's own API objects.
+    const target = body?.api
+      ? kernelCore?.apis?.[body.api]
+      : body?.service
+        ? kernelSession?.[body.service]?.()
+        : kernelSession;
+    if (!target) throw Object.assign(new Error("no such service"), { status: 404 });
+    if (body?.method === undefined) return { methods: discoverMethods(target) };
+    if (typeof target[body.method] !== "function") {
+      throw Object.assign(new Error("no such method"), { status: 404 });
+    }
+    const result = await target[body.method](...(Array.isArray(body.args) ? body.args : []));
+    return { result: debugText(result) };
+  }
+  throw Object.assign(new Error("Not Found"), { status: 404 });
+}
+
 function publicStatus() {
   return {
     version: "0.3.4",
@@ -895,6 +1047,16 @@ async function startControlServer() {
         return sendJson(res, 200, { code: 0, data: { closed: await hangup() } });
       } catch (error) {
         return sendJson(res, 500, { code: -1, message: error?.message ?? String(error) });
+      }
+    }
+    if (settings.keepAvsdkLogs && url.pathname.startsWith("/v1/debug")) {
+      try {
+        return sendJson(res, 200, { code: 0, data: await handleDebug(req, url) });
+      } catch (error) {
+        return sendJson(res, error?.status ?? 500, {
+          code: -1,
+          message: error?.message ?? String(error),
+        });
       }
     }
     if (req.method === "POST" && url.pathname === "/v1/avsdk/output") {
@@ -950,7 +1112,10 @@ function scheduleAVHostLogin(ctx, delayMs = 500) {
         session?.getAccountPath?.(Number.parseInt(selfUin, 10)) || ctx.core?.dataPath || "",
       );
       if (!selfUid || !selfUin || !accountPath) throw new Error("QQ identity is unavailable");
-      await invokeAVHost(1, [selfUid, selfUin, selfUin, accountPath, ""]);
+      // [uid, uin, replacement uid, data path, machine id]. A replacement uid
+      // is what AVSDK enters rooms as: it must stay empty, or group calls see
+      // an unknown member "0" (one-to-one calls do not show it).
+      await invokeAVHost(1, [selfUid, selfUin, "", accountPath, ""]);
       state.avHost.loginPosted = true;
       state.avHost.lastError = null;
     } catch (error) {

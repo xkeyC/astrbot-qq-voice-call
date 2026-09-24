@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
@@ -260,4 +261,102 @@ test("StartCall parameters describe a voice call to one friend", () => {
   assert.equal(params.invite_count, 1);
   assert.equal(params.sub_business_type, 3);
   assert.equal(params.relation_id, "9");
+});
+
+test("group calls: AVSDK logs in without a replacement uid, leaves with Quit", async () => {
+  const controlPort = await unusedLoopbackPort();
+  const avPort = await unusedLoopbackPort();
+  const token = "test-token-that-is-longer-than-thirty-two-bytes";
+  const env = {
+    ASTRBOT_QQ_CALL_BRIDGE_TOKEN: token,
+    ASTRBOT_QQ_CALL_BRIDGE_PORT: String(controlPort),
+    ASTRBOT_QQ_CALL_AV_HOST_PORT: String(avPort),
+  };
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  // A stand-in AV host that records the commands it is sent.
+  const invoked = [];
+  const avHost = http.createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    invoked.push(JSON.parse(body));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end('{"code":0}');
+  });
+  await new Promise((resolve) => avHost.listen(avPort, "127.0.0.1", resolve));
+  const context = {
+    logger: { info() {}, warn() {}, error() {} },
+    router: { get() {} },
+    core: {
+      selfInfo: { uid: "u_self", uin: "10001" },
+      dataPath: "/data",
+      context: { session: { getAVSDKService: () => null } },
+    },
+  };
+  const baseUrl = `http://127.0.0.1:${controlPort}`;
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const output = (command, value) =>
+    fetch(`${baseUrl}/v1/avsdk/output`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ command, value }),
+    }).then((res) => assert.equal(res.status, 200));
+  const call = async () =>
+    (await (await fetch(`${baseUrl}/v1/calls/current`, { headers })).json()).data;
+  const waitFor = async (predicate) => {
+    for (let i = 0; i < 100 && !predicate(); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(predicate());
+  };
+  const groupInvite = [3, "u_inviter", ["u_self"], 1, "971962939", 3, "415", 1, 0, 1, 1, "393"];
+
+  try {
+    await plugin_init(context);
+    await waitFor(() => invoked.some((item) => item.command === 1));
+    // A replacement uid (third) would make the room see an unknown member.
+    assert.deepEqual(invoked.find((item) => item.command === 1).params, [
+      "u_self",
+      "10001",
+      "",
+      "/data",
+      "",
+    ]);
+
+    await output(20006, groupInvite);
+    await output(20004, [0, 3, "971962939", "", 0, "", 1]);
+    let current = await call();
+    assert.equal(current.phase, "connected");
+    assert.equal(current.scene, 3);
+    assert.equal(current.groupId, "971962939");
+    // The account stays while someone else is in the room, and leaves when
+    // the last one has: with Quit, not a one-to-one Close.
+    await output(20008, ["u_inviter", 0, 1, 2, 0, 0, ""]);
+    await output(20008, ["u_self", 0, 0, 2, 0, 0, ""]);
+    await output(20009, [0, "u_self_other_device", 0, 0, 2, 0, 0, "", ""]);
+    assert.equal((await call()).phase, "connected");
+    await output(20009, [0, "u_inviter", 0, 0, 2, 0, 0, "", ""]);
+    await waitFor(() => invoked.some((item) => item.command === 8));
+    assert.deepEqual(invoked.find((item) => item.command === 8).params, [3, 0]);
+    assert.equal((await call()).phase, "ended");
+    assert.ok(!invoked.some((item) => item.command === 10));
+
+    // Removed from a group call: AVSDK is told to leave too, or it would
+    // ignore the next invitation.
+    invoked.length = 0;
+    await output(20006, groupInvite);
+    await output(20004, [0, 3, "971962939", "", 0, "", 1]);
+    await output(20009, [0, "u_self", 0, 0, 2, 0, 0, "", ""]);
+    current = await call();
+    assert.equal(current.phase, "ended");
+    assert.equal(current.endReason, "avsdk 20009");
+    await waitFor(() => invoked.some((item) => item.command === 8));
+  } finally {
+    await plugin_cleanup();
+    await new Promise((resolve) => avHost.close(resolve));
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

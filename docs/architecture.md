@@ -32,8 +32,9 @@ NapCat bridge plugin ── WebSocket /v1/stream ──────────�
 
 - Keeps the bridge stream open and reconnects after failures.
 - On `connected`, starts a `VoiceSession` keyed by the caller, paired with
-  `<aiocqhttp platform>:FriendMessage:<uin>`; closes it when the phase leaves
-  `connected`.
+  `<aiocqhttp platform>:FriendMessage:<uin>`; for a group call (`scene` 3), keyed
+  by the group and paired with `<aiocqhttp platform>:GroupMessage:<group>`, as
+  the voice user. Closes it when the phase leaves `connected`.
 - Tells the realtime model the call is up, so the bot speaks first.
 - Offers the `qq_voice_call` tool; its permission is whatever the tool
   permission rules give it.

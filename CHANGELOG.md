@@ -7,6 +7,26 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Group calls: invited to a QQ group call, the bot joins it paired with that
+  group's chat, where handed-off tasks run as the fixed voice user (a member),
+  and speaks only when addressed by name. `qq_voice_hangup` leaves the call
+  (the others stay); the bot also leaves once everyone else has.
+- Bridge debug mode (`ASTRBOT_QQ_CALL_AVSDK_LOGS=1`): `/v1/debug` records raw
+  AVSDK outputs, kernel events and the commands sent, and can send any AVSDK
+  command or call a kernel service method, for reverse engineering.
+
+### Fixed
+
+- The AV host no longer logs in to AVSDK with the QQ number as replacement
+  uid: rooms saw it as an unknown member "0" beside the silent bot account.
+- A group call was hung up as a one-to-one call, which dropped the audio but
+  left the bot in the call, and AVSDK then ignored the next invitation; it is
+  now left with Quit, also when the room ends on its own.
+- The realtime model hands hanging up over in fixed words naming
+  `qq_voice_hangup`: a bare "end the call" was taken for a goodbye.
+
 ### Removed
 
 - The `minicpm_omni` voice backend (`voice_backend` and the `omni_*`

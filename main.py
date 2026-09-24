@@ -6,7 +6,9 @@ WebSocket: text frames carry the call state, binary frames carry audio
 (16-bit mono PCM at 48 kHz) both ways. Each call becomes an
 ``astrbot.core.voice`` session paired with the caller's private chat: what is
 asked on the phone runs as a turn of that chat, as the caller (their
-permissions, the chat's context, persona, tools and memories).
+permissions, the chat's context, persona, tools and memories). A group call
+the bot is invited to is paired with that group's chat instead, where turns
+run as the fixed voice user (speakers cannot be told apart).
 
 Needs the AstrBot Codex fork (``astrbot.core.voice``).
 """
@@ -29,14 +31,23 @@ CALL_PROMPT = """Your name is {name}. You are on a QQ voice call, one to one, wi
 
 Talk like on the phone: brief, natural, in the caller's language. Delegate real tasks (anything needing facts, lookups or work) to the backend and tell the caller the result briefly.
 
-When the caller wants to end the call (asks you to hang up, says goodbye), say a short goodbye and delegate "hang up the call" to the backend: only the backend can hang up."""
+When the caller wants to end the call (asks you to hang up, says goodbye), say a short goodbye and delegate, in exactly these words, "Hang up this QQ call with the qq_voice_hangup tool.": only the backend can hang up, and it needs these words to know that it must."""
 
 OUTGOING_PROMPT = """You placed this call yourself. The reason: {purpose}"""
+
+GROUP_PROMPT = """Your name is {name}. You are in a QQ group voice call of the group "{group}", invited by {caller}. Several people may be in the call, and much of what you hear is them talking to each other.
+
+Speak only when someone says your name to you, or is directly continuing an exchange with you from a few seconds ago; otherwise stay completely silent (no audio, no text). When addressed, answer briefly in the speaker's language. Delegate real tasks (anything needing facts, lookups or work) to the backend and tell the result briefly.
+
+When you are asked to leave the call, say a short goodbye and delegate, in exactly these words, "Leave this QQ group call with the qq_voice_hangup tool.": only the backend can hang up, and it needs these words to know that it must."""
 
 # Told to the realtime model once the call is up, so that the bot speaks
 # first, as whoever answers or places a phone call does.
 ANSWER_CUE = "(The call is connected. Answer the phone with a short greeting.)"
 DIAL_CUE = "(The call is connected. Greet them and briefly say why you are calling.)"
+GROUP_CUE = "(You joined the group call. Greet everyone with one short sentence.)"
+# AVSDK scene of a group call, as the bridge reports it.
+SCENE_GROUP = 3
 
 RECONNECT_SECONDS = 5.0
 CONNECT_TIMEOUT = 15.0
@@ -178,7 +189,12 @@ class QQVoiceCallPlugin(Star):
         if self.session_invite != invite:
             return
         uin = str(self.call.get("callerUin") or "")
-        if not uin:
+        group_id = (
+            str(self.call.get("groupId") or "")
+            if self.call.get("scene") == SCENE_GROUP
+            else ""
+        )
+        if not uin and not group_id:
             # The bridge answered already: a silent line helps nobody.
             await self._hang_up_call(invite, "caller unknown")
             return
@@ -198,7 +214,7 @@ class QQVoiceCallPlugin(Star):
             else ""
         )
         self.dialing = None
-        caller = str(self.call.get("callerName") or uin)
+        caller = str(self.call.get("callerName") or uin or "someone")
         options = VoiceOptions(
             name=str(self.config.get("voice_name") or "AstrBot"),
             aliases=[],
@@ -209,12 +225,39 @@ class QQVoiceCallPlugin(Star):
             # choppy audio; TCP does not (see astrbot.core.voice.icetcp).
             media_tcp=bool(self.config.get("media_over_tcp", True)),
         )
-        prompt = CALL_PROMPT.format(name=options.name, caller=caller)
-        if outgoing:
-            prompt += "\n\n" + OUTGOING_PROMPT.format(purpose=purpose or "not given")
+        if group_id:
+            # The group's chat, as the voice user: a group call is a channel.
+            prompt = GROUP_PROMPT.format(
+                name=options.name, group=group_id, caller=caller
+            )
+            opening = GROUP_CUE
+            key = f"group:{group_id}"
+            label = f"group {group_id}"
+            chat = VoiceChat(
+                umo=f"{platform_id}:GroupMessage:{group_id}",
+                private=False,
+                via="QQ group voice call",
+            )
+        else:
+            prompt = CALL_PROMPT.format(name=options.name, caller=caller)
+            if outgoing:
+                prompt += "\n\n" + OUTGOING_PROMPT.format(
+                    purpose=purpose or "not given"
+                )
+            opening = DIAL_CUE if outgoing else ANSWER_CUE
+            key = f"call:{uin}"
+            label = uin
+            # What is asked on the phone runs in the caller's private chat, as
+            # the caller: one context with their text chat, queued with it.
+            chat = VoiceChat(
+                umo=f"{platform_id}:FriendMessage:{uin}",
+                private=True,
+                sender_id=uin,
+                sender_name=caller,
+                via="QQ voice call",
+            )
         # The session appends the voice persona or voice_prompt.
         prompt += "\n\n" + time_prompt()
-        opening = DIAL_CUE if outgoing else ANSWER_CUE
 
         def closed(session) -> None:
             if self.session is session:
@@ -228,8 +271,8 @@ class QQVoiceCallPlugin(Star):
                 self._spawn(self._hang_up_call(invite, "voice session ended"))
 
         session = VoiceSession(
-            key=f"call:{uin}",
-            scope_id=f"{platform_id}:voice:call:{uin}",
+            key=key,
+            scope_id=f"{platform_id}:voice:{key}",
             prompt=prompt,
             options=options,
             # Queued and paced out: WebRTC hands over a realtime model's
@@ -242,30 +285,25 @@ class QQVoiceCallPlugin(Star):
                 trim_silence=True,
             ),
             on_closed=closed,
-            # What is asked on the phone runs in the caller's private chat, as
-            # the caller: one context with their text chat, queued with it.
-            chat=VoiceChat(
-                umo=f"{platform_id}:FriendMessage:{uin}",
-                private=True,
-                sender_id=uin,
-                sender_name=caller,
-                via="QQ voice call",
-            ),
+            chat=chat,
             label="QQ call",
         )
         self.session = session
         session.launch(
-            lambda exc: logger.error("QQ voice call with %s failed: %s", uin, exc)
+            lambda exc: logger.error("QQ voice call with %s failed: %s", label, exc)
         )
-        logger.info(
-            "QQ voice call %s %s (%s)", "to" if outgoing else "from", caller, uin
-        )
+        if group_id:
+            logger.info("QQ group call %s, invited by %s", group_id, caller)
+        else:
+            logger.info(
+                "QQ voice call %s %s (%s)", "to" if outgoing else "from", caller, uin
+            )
         # A failed start closes the session, and closing hangs up; a start that
         # hangs is given up the same way.
         started = time.monotonic()
         while not session.ready and not session.closing:
             if time.monotonic() - started > START_TIMEOUT:
-                logger.warning("QQ voice call with %s: voice did not start", uin)
+                logger.warning("QQ voice call with %s: voice did not start", label)
                 await session.close("start timed out")
                 return
             await asyncio.sleep(0.1)
@@ -276,12 +314,12 @@ class QQVoiceCallPlugin(Star):
             try:
                 await session.say(opening)
             except RuntimeError as exc:  # closed in the meantime
-                logger.info("QQ voice call with %s: no opening: %s", uin, exc)
+                logger.info("QQ voice call with %s: no opening: %s", label, exc)
         # Hang up a call nobody speaks in any more (a forgotten line).
         idle = float(self.config.get("idle_hangup_seconds") or IDLE_HANGUP_SECONDS)
         while self.session is session and not session.closing:
             if time.monotonic() - session.last_activity > idle:
-                logger.info("QQ voice call with %s idle, hanging up", uin)
+                logger.info("QQ voice call with %s idle, hanging up", label)
                 if not await self._hang_up_call(invite, "idle"):
                     # Stop listening at least; closing tries to hang up again.
                     await session.close("hang-up failed")
@@ -418,7 +456,7 @@ class QQVoiceCallPlugin(Star):
 
     @llm_tool("qq_voice_hangup")
     async def qq_voice_hangup(self, event: AstrMessageEvent) -> str:
-        """挂断当前的 QQ 语音电话。通话中对方道别、说要挂了，或者事情已经说完时调用。"""
+        """挂断当前的 QQ 语音电话（群通话则是退出通话，其他人继续）。通话中对方道别、说要挂了、让你退出，或者事情已经说完时调用。"""
         if self._http is None:
             return json.dumps({"error": "QQ 通话桥未连接"}, ensure_ascii=False)
         try:

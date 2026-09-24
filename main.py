@@ -1,7 +1,5 @@
-"""QQ voice calls for AstrBot, through the NapCat AV bridge.
-
-Calls run on Codex realtime by default, or on a local MiniCPM-o server
-(``voice_backend = minicpm_omni``).
+"""QQ voice calls for AstrBot, through the NapCat AV bridge, on Codex
+realtime.
 
 The bridge (``bridge/``) answers QQ calls and streams the call over one
 WebSocket: text frames carry the call state, binary frames carry audio
@@ -29,7 +27,9 @@ from astrbot.api.star import Context, Star
 
 CALL_PROMPT = """Your name is {name}. You are on a QQ voice call, one to one, with {caller}. Everything you hear is meant for you.
 
-Talk like on the phone: brief, natural, in the caller's language. Delegate real tasks (anything needing facts, lookups or work) to the backend and tell the caller the result briefly."""
+Talk like on the phone: brief, natural, in the caller's language. Delegate real tasks (anything needing facts, lookups or work) to the backend and tell the caller the result briefly.
+
+When the caller wants to end the call (asks you to hang up, says goodbye), say a short goodbye and delegate "hang up the call" to the backend: only the backend can hang up."""
 
 OUTGOING_PROMPT = """You placed this call yourself. The reason: {purpose}"""
 
@@ -37,9 +37,6 @@ OUTGOING_PROMPT = """You placed this call yourself. The reason: {purpose}"""
 # first, as whoever answers or places a phone call does.
 ANSWER_CUE = "(The call is connected. Answer the phone with a short greeting.)"
 DIAL_CUE = "(The call is connected. Greet them and briefly say why you are calling.)"
-# The omni backend's opening is a purpose the paired chat words (OPENING_BODY).
-OMNI_ANSWER_PURPOSE = "对方打来的电话刚接通：简短地打个招呼。"
-OMNI_DIAL_PURPOSE = "你主动打给对方的电话刚接通：简短地问好。"
 
 RECONNECT_SECONDS = 5.0
 CONNECT_TIMEOUT = 15.0
@@ -50,9 +47,7 @@ DIAL_TIMEOUT = 90.0
 # The bridge may take a while to dial (uid lookup, AV host round trips).
 DIAL_REQUEST_TIMEOUT = 30.0
 IDLE_HANGUP_SECONDS = 120.0
-# A voice session not listening by then is given up and the call hung up. (A
-# first omni use may download its models for longer: that goes on after the
-# give-up, and the next call finds them.)
+# A voice session not listening by then is given up and the call hung up.
 START_TIMEOUT = 150.0
 # Attempts, and the pause between them, to end a call the bridge failed to.
 HANGUP_ATTEMPTS = 3
@@ -172,7 +167,6 @@ class QQVoiceCallPlugin(Star):
                 self._spawn(old.close(f"call {phase}"))
 
     async def _start_call(self, invite: str) -> None:
-        from astrbot.core.voice import omni
         from astrbot.core.voice.chat import VoiceChat
         from astrbot.core.voice.pcm import PcmMedia
         from astrbot.core.voice.session import VoiceOptions, VoiceSession, time_prompt
@@ -215,68 +209,37 @@ class QQVoiceCallPlugin(Star):
             # choppy audio; TCP does not (see astrbot.core.voice.icetcp).
             media_tcp=bool(self.config.get("media_over_tcp", True)),
         )
-        local = self.config.get("voice_backend") == "minicpm_omni"
-        backend: dict = {}
-        if local:
-            # A call is one to one: no silence bias, as for a Mumble whisper.
-            backend = {
-                "omni": omni.OmniOptions(
-                    url=str(self.config.get("omni_url") or omni.OmniOptions.url),
-                    ref_audio=str(self.config.get("omni_ref_audio") or "").strip(),
-                    silence_bias=0.0,
-                    # Empty on purpose means no acknowledgement.
-                    tool_filler=str(
-                        self.config.get(
-                            "omni_tool_filler", omni.OmniOptions.tool_filler
-                        )
-                        or ""
-                    ),
-                    asr_dir=str(self.config.get("omni_asr_dir") or "").strip(),
-                ),
-                "group": False,
-            }
-            prompt = omni.duplex_prompt(options.name, caller)
-            opening = purpose or (
-                OMNI_DIAL_PURPOSE if outgoing else OMNI_ANSWER_PURPOSE
-            )
-        else:
-            prompt = CALL_PROMPT.format(name=options.name, caller=caller)
-            if outgoing:
-                prompt += "\n\n" + OUTGOING_PROMPT.format(
-                    purpose=purpose or "not given"
-                )
-            # The session appends the voice persona or voice_prompt.
-            prompt += "\n\n" + time_prompt()
-            opening = DIAL_CUE if outgoing else ANSWER_CUE
+        prompt = CALL_PROMPT.format(name=options.name, caller=caller)
+        if outgoing:
+            prompt += "\n\n" + OUTGOING_PROMPT.format(purpose=purpose or "not given")
+        # The session appends the voice persona or voice_prompt.
+        prompt += "\n\n" + time_prompt()
+        opening = DIAL_CUE if outgoing else ANSWER_CUE
 
         def closed(session) -> None:
             if self.session is session:
                 self.session = None
             # The session failed or ended on its own (realtime closed, WebRTC
-            # failed, the omni server refused it) while the call is still up:
+            # failed) while the call is still up:
             # end the call rather than leave a silent line. A call ending first
             # clears session_invite before closing the session; the invite is
             # kept here so the same call does not get a new session.
             if self.session_invite == invite:
                 self._spawn(self._hang_up_call(invite, "voice session ended"))
 
-        session = (omni.OmniVoiceSession if local else VoiceSession)(
-            **backend,
+        session = VoiceSession(
             key=f"call:{uin}",
             scope_id=f"{platform_id}:voice:call:{uin}",
             prompt=prompt,
             options=options,
             # Queued and paced out: WebRTC hands over a realtime model's
-            # speech in bursts, and the omni server delivers it ahead of time
-            # and cuts it on barge-in.
+            # speech in bursts.
             media=PcmMedia(
                 self._send_audio,
-                buffer_seconds=omni.PLAYOUT_BUFFER_SECONDS
-                if local
-                else REALTIME_BUFFER,
+                buffer_seconds=REALTIME_BUFFER,
                 # A realtime peer sends silence all along: skipping it while a
                 # backlog exists keeps a stall from adding lasting latency.
-                trim_silence=not local,
+                trim_silence=True,
             ),
             on_closed=closed,
             # What is asked on the phone runs in the caller's private chat, as

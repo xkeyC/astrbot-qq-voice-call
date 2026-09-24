@@ -93,13 +93,6 @@ class FakeSession:
         self.kwargs["on_closed"](self)
 
 
-class FakeOmniSession(FakeSession):
-    def __init__(self, *, omni, group, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.omni = omni
-        self.group = group
-
-
 class FakePlatform:
     def meta(self):
         class Meta:
@@ -132,11 +125,8 @@ async def wait_for(predicate, timeout: float = 5.0) -> None:
 async def setup(monkeypatch):
     from astrbot.core.voice import session as voice_session
 
-    from astrbot.core.voice import omni
-
     FakeSession.instances.clear()
     monkeypatch.setattr(voice_session, "VoiceSession", FakeSession)
-    monkeypatch.setattr(omni, "OmniVoiceSession", FakeOmniSession)
     bridge = FakeBridge()
     app = web.Application()
     app.router.add_get("/v1/stream", bridge.stream)
@@ -260,7 +250,7 @@ async def test_hangup_tool_and_idle_hangup(setup):
 
 
 @pytest.mark.asyncio
-async def test_codex_is_the_default_backend(setup):
+async def test_calls_run_on_codex_realtime(setup):
     plugin, bridge = setup
     await bridge.call(phase="connected", inviteAt="e", callerUin="8")
     await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
@@ -268,33 +258,6 @@ async def test_codex_is_the_default_backend(setup):
     assert type(session) is FakeSession
     assert session.media._queue is not None  # bursts are paced out
     assert session.kwargs["options"].media_tcp is True
-
-
-@pytest.mark.asyncio
-async def test_omni_backend_answers_and_dials_with_a_purpose(setup):
-    plugin, bridge = setup
-    plugin.config.update(
-        voice_backend="minicpm_omni", omni_url="ws://omni:1/backend", voice_name="小Q"
-    )
-    await bridge.call(phase="connected", inviteAt="f", callerUin="9", callerName="Bob")
-    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
-    session = FakeSession.instances[0]
-    assert isinstance(session, FakeOmniSession)
-    assert session.omni.url == "ws://omni:1/backend"
-    assert session.omni.silence_bias == 0.0
-    assert session.group is False
-    assert "Bob" in session.kwargs["prompt"] and "小Q" in session.kwargs["prompt"]
-    assert session.media._queue is not None  # paced, so barge-in can flush it
-    assert session.said == [plugin_main.OMNI_ANSWER_PURPOSE]
-
-    await bridge.call(phase="ended", inviteAt="f", callerUin="9")
-    await wait_for(lambda: plugin.session is None)
-    await plugin.qq_voice_call(FakeEvent(), purpose="提醒交房租")
-    await bridge.call(phase="connected", inviteAt="g", callerUin="42", outgoing=True)
-    await wait_for(
-        lambda: len(FakeSession.instances) == 2 and FakeSession.instances[1].said
-    )
-    assert FakeSession.instances[1].said == ["提醒交房租"]
 
 
 @pytest.mark.asyncio

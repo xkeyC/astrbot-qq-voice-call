@@ -27,7 +27,7 @@ QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot �
 
 | 功能 | 状态 |
 |---|---|
-| 接听来电、全双工对话、打断 | 已在 NapCat Docker 里用真实 QQ 来电验证（Codex 与本地 omni 两种后端） |
+| 接听来电、全双工对话、打断 | 已在 NapCat Docker 里用真实 QQ 来电验证 |
 | WebSocket 音频/状态通道（可跨容器） | 已实现，有测试 |
 | 主动拨号 `/v1/calls/dial`、挂断 `/v1/calls/hangup` | 已实现：指令和参数由静态逆向 `libAVSDKPlugin.so` 得出，**待实机验证** |
 | 本地测试镜像 `docker/Dockerfile` | 基于 `mlikiowa/napcat-docker`，补齐 pulseaudio 与 AVSDK 依赖库并装好桥 |
@@ -54,7 +54,6 @@ ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0 ~/.local/share/astrbot-qq-voice-call/scripts
 - `bridge_token` 或 `bridge_token_file`：桥的 Token
 - `platform_id`：配套的 aiocqhttp 平台 ID，留空就用第一个
 - `voice_name`、`voice`、`voice_prompt` 等：电话里的名字、音色和附加提示词
-- `voice_backend`：语音后端，默认 `codex_realtime`（Codex 实时语音）；改为 `minicpm_omni` 就用自己部署的 llama.cpp-omni（MiniCPM-o）服务端在本地完成对话，查询、执行等任务仍交给来电者私聊的 Agent（Codex）。这时还要填 `omni_url`，可选填 `omni_ref_audio`（音色克隆）、`omni_tool_filler`、`omni_asr_dir`。omni 服务端同一时间只服务一个会话，被拒时插件会挂断这通电话
 
 AstrBot 这边不需要装 PulseAudio 或 parec/pacat。
 

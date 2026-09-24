@@ -7,12 +7,16 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Added
+### Removed
 
-- `voice_backend` option: `codex_realtime` (default) or `minicpm_omni`, the
-  local MiniCPM-o server of the AstrBot fork's omni voice backend, with
-  `omni_url`, `omni_ref_audio`, `omni_tool_filler` and `omni_asr_dir`. Omni
-  speech is paced out through PcmMedia's playout buffer so barge-in can cut it.
+- The `minicpm_omni` voice backend (`voice_backend` and the `omni_*`
+  settings), with the AstrBot core's omni module: calls run on Codex realtime
+  only.
+
+### Changed
+
+- Asked to hang up, the realtime model hands it to the chat's agent, which
+  hangs up with `qq_voice_hangup` (the realtime model has no tools).
 
 ## [0.4.0] - 2026-09-24
 

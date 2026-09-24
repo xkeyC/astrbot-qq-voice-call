@@ -247,7 +247,8 @@ async def test_codex_is_the_default_backend(setup):
     await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
     session = FakeSession.instances[0]
     assert type(session) is FakeSession
-    assert session.media._queue is None  # realtime audio passes straight on
+    assert session.media._queue is not None  # bursts are paced out
+    assert session.kwargs["options"].media_tcp is True
 
 
 @pytest.mark.asyncio

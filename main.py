@@ -47,6 +47,8 @@ IDENTITY_WAIT = 3.0
 DIAL_TIMEOUT = 90.0
 READY_WAIT = 20.0
 IDLE_HANGUP_SECONDS = 120.0
+# Upper bound of the bot's speech queued ahead with Codex realtime.
+REALTIME_BUFFER = 3.0
 
 
 class QQVoiceCallPlugin(Star):
@@ -191,6 +193,9 @@ class QQVoiceCallPlugin(Star):
             model=str(self.config.get("voice_model") or ""),
             extra_prompt=str(self.config.get("voice_prompt") or ""),
             agent_instructions=str(self.config.get("agent_instructions") or ""),
+            # UDP to the realtime peer loses packets on long paths, heard as
+            # choppy audio; TCP does not (see astrbot.core.voice.icetcp).
+            media_tcp=bool(self.config.get("media_over_tcp", True)),
         )
         local = self.config.get("voice_backend") == "minicpm_omni"
         backend: dict = {}
@@ -235,12 +240,14 @@ class QQVoiceCallPlugin(Star):
             scope_id=f"{platform_id}:voice:call:{uin}",
             prompt=prompt,
             options=options,
-            # The omni server delivers speech ahead of time and cuts it on
-            # barge-in, so it is queued here and paced out (a newer core).
-            media=(
-                PcmMedia(self._send_audio, buffer_seconds=omni.PLAYOUT_BUFFER_SECONDS)
+            # Queued and paced out: WebRTC hands over a realtime model's
+            # speech in bursts, and the omni server delivers it ahead of time
+            # and cuts it on barge-in.
+            media=PcmMedia(
+                self._send_audio,
+                buffer_seconds=omni.PLAYOUT_BUFFER_SECONDS
                 if local
-                else PcmMedia(self._send_audio)
+                else REALTIME_BUFFER,
             ),
             on_closed=closed,
             # The caller's private chat: its member tools and memories.

@@ -40,6 +40,7 @@ DIAL_CUE = "(The call is connected. Greet them and briefly say why you are calli
 OMNI_ANSWER_PURPOSE = "对方打来的电话刚接通：简短地打个招呼。"
 
 RECONNECT_SECONDS = 5.0
+CONNECT_TIMEOUT = 15.0
 # How long a connected call waits for the bridge to name the caller.
 IDENTITY_WAIT = 3.0
 # How long an outgoing call may take to be answered before it is forgotten.
@@ -98,9 +99,13 @@ class QQVoiceCallPlugin(Star):
         url = self._base_url().replace("http", "ws", 1) + "/v1/stream"
         while True:
             try:
-                async with self._http.ws_connect(
-                    url, headers=self._headers(), heartbeat=15
-                ) as ws:
+                # The handshake has its own timeout: a proxy or relay that
+                # accepts the connection but never answers would hang here.
+                ws = await asyncio.wait_for(
+                    self._http.ws_connect(url, headers=self._headers(), heartbeat=15),
+                    CONNECT_TIMEOUT,
+                )
+                async with ws:
                     self._ws = ws
                     logger.info("QQ voice call: bridge stream connected")
                     writer = asyncio.create_task(self._write(ws))

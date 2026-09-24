@@ -223,7 +223,7 @@ class QQVoiceCallPlugin(Star):
                 ),
                 "group": False,
             }
-            prompt = omni.duplex_prompt(options.name, options.extra_prompt, caller)
+            prompt = omni.duplex_prompt(options.name, caller)
             opening = purpose or OMNI_ANSWER_PURPOSE
         else:
             prompt = CALL_PROMPT.format(name=options.name, caller=caller)
@@ -231,9 +231,8 @@ class QQVoiceCallPlugin(Star):
                 prompt += "\n\n" + OUTGOING_PROMPT.format(
                     purpose=purpose or "not given"
                 )
+            # The session appends the voice persona or voice_prompt.
             prompt += "\n\n" + time_prompt()
-            if options.extra_prompt:
-                prompt += "\n\n" + options.extra_prompt
             opening = DIAL_CUE if outgoing else ANSWER_CUE
 
         def closed(session) -> None:

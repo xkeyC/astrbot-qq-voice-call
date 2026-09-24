@@ -81,7 +81,7 @@
     "description": "附加提示词",
     "type": "text",
     "default": "",
-    "hint": "追加给实时语音模型，例如人设、说话风格"
+    "hint": "追加给语音模型（负责听和说）的精简指令。来电者私聊当前人格里填了“语音人格”时，用那一项代替这里"
   },
   "idle_hangup_seconds": {
     "description": "空闲自动挂断（秒）",

@@ -161,6 +161,7 @@ class QQVoiceCallPlugin(Star):
 
     async def _start_call(self, invite: str) -> None:
         from astrbot.core.voice import omni
+        from astrbot.core.voice.chat import VoiceChat
         from astrbot.core.voice.pcm import PcmMedia
         from astrbot.core.voice.session import VoiceOptions, VoiceSession, time_prompt
 
@@ -198,7 +199,6 @@ class QQVoiceCallPlugin(Star):
             voice=str(self.config.get("voice") or ""),
             model=str(self.config.get("voice_model") or ""),
             extra_prompt=str(self.config.get("voice_prompt") or ""),
-            agent_instructions=str(self.config.get("agent_instructions") or ""),
             # UDP to the realtime peer loses packets on long paths, heard as
             # choppy audio; TCP does not (see astrbot.core.voice.icetcp).
             media_tcp=bool(self.config.get("media_over_tcp", True)),
@@ -266,8 +266,15 @@ class QQVoiceCallPlugin(Star):
                 trim_silence=not local,
             ),
             on_closed=closed,
-            # The caller's private chat: its member tools and memories.
-            memory_scope=f"{platform_id}:FriendMessage:{uin}",
+            # What is asked on the phone runs in the caller's private chat, as
+            # the caller: one context with their text chat, queued with it.
+            chat=VoiceChat(
+                umo=f"{platform_id}:FriendMessage:{uin}",
+                private=True,
+                sender_id=uin,
+                sender_name=caller,
+                via="QQ voice call",
+            ),
             label="QQ call",
         )
         self.session = session

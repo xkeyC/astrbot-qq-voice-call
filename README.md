@@ -6,7 +6,7 @@
 
 > 需要 **AstrBot Codex fork**（提供 `astrbot.core.voice`），并在 Codex 执行器里登录一个包含 Codex 语音的 ChatGPT 订阅账号。上游 AstrBot 用不了。
 >
-> 当前版本要求 fork 包含 `PcmMedia(buffer_seconds=...)` 和 `VoiceOptions.media_tcp`（`qq-voice` 分支的 `eedf46bb`、`2f5f2a66` 及之后）；更早的核心上接通时会报 TypeError。
+> 当前版本要求 fork 包含 `astrbot.core.voice.chat.VoiceChat`、`PcmMedia(buffer_seconds=..., trim_silence=...)` 和 `VoiceOptions.media_tcp`（AstrBot `qq-voice` 分支 `d48bea11` 及之后），以及支持 `realtime.host_routes_handoffs` 的 codex binding（codex `79c875d95` 及之后）。
 
 ## 工作方式
 
@@ -20,7 +20,7 @@ QQ ──(AVSDK)── NapCat AV 桥 ──WebSocket /v1/stream──> AstrBot �
 - **来电**：桥自动接听。接通后插件为来电者开一个实时语音会话，bot 先开口打招呼。
 - **去电**：LLM 工具 `qq_voice_call(purpose, user_id)` 负责拨号。对方接听后，bot 根据 `purpose` 说明来意。
 - **挂断**：工具 `qq_voice_hangup`。通话里的后台 Agent 在对方道别或事情说完时调用；另外，超过 `idle_hangup_seconds`（默认 120 秒）没听到对方说话也会自动挂断。
-- **会话配套**：每通电话配套到 `<aiocqhttp 平台 ID>:FriendMessage:<QQ号>`。语音 Agent 拿到的是普通成员在这个私聊里能用的工具、审批规则和执行环境；开启记忆时，能读全局记忆和这个私聊的记忆。语音线程按来电者持久化，下次来电接着用。
+- **和私聊共享 Agent**：电话里交给后台的事，作为来电者私聊（`<aiocqhttp 平台 ID>:FriendMessage:<QQ号>`）的一轮对话来执行，**以来电者本人的身份和权限**（管理员打来就是管理员）。上下文、人格、工具、记忆和审批都和文字聊天是同一套；文字消息和语音请求互相排队，聊天正忙时 bot 会先口头说一声。回答只念出来，不会在聊天里发文字。
 - **权限**：`qq_voice_call` 是普通插件工具，谁能用、能不能拨给别人，都由现有的工具权限规则决定。
 
 ## 状态

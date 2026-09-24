@@ -168,7 +168,9 @@ async def test_incoming_call_becomes_a_voice_session(setup):
     )
     await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
     session = FakeSession.instances[0]
-    assert session.kwargs["memory_scope"] == "qq1:FriendMessage:123"
+    chat = session.kwargs["chat"]
+    assert chat.umo == "qq1:FriendMessage:123"
+    assert chat.private and chat.sender_id == "123" and chat.sender_name == "Alice"
     assert session.kwargs["scope_id"] == "qq1:voice:call:123"
     assert "with Alice" in session.kwargs["prompt"]
     assert "placed this call" not in session.kwargs["prompt"]

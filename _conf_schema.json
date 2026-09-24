@@ -88,11 +88,5 @@
     "type": "int",
     "default": 120,
     "hint": "通话中这么久没听到对方说话就挂断"
-  },
-  "agent_instructions": {
-    "description": "后台 Agent 指令",
-    "type": "text",
-    "default": "",
-    "hint": "替换语音 Agent 线程的默认基础指令；留空用默认"
   }
 }

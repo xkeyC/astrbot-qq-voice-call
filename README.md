@@ -52,6 +52,7 @@ ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0 ~/.local/share/astrbot-qq-voice-call/scripts
 - `bridge_token` 或 `bridge_token_file`：桥的 Token
 - `platform_id`：配套的 aiocqhttp 平台 ID，留空就用第一个
 - `voice_name`、`voice`、`voice_prompt` 等：电话里的名字、音色和附加提示词
+- `voice_backend`：语音后端，默认 `codex_realtime`（Codex 实时语音）；改为 `minicpm_omni` 就用自己部署的 llama.cpp-omni（MiniCPM-o）服务端在本地完成对话，查询、执行等任务仍交给语音 Agent 线程（Codex）。这时还要填 `omni_url`，可选填 `omni_ref_audio`（音色克隆）、`omni_tool_filler`、`omni_asr_dir`。omni 服务端同一时间只服务一个会话；插话打断依赖 AstrBot 核心 `PcmMedia` 的播放缓冲（`qq-voice` 分支的 `eedf46bb`）
 
 AstrBot 这边不需要装 PulseAudio 或 parec/pacat。
 

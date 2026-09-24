@@ -7,6 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- `voice_backend` option: `codex_realtime` (default) or `minicpm_omni`, the
+  local MiniCPM-o server of the AstrBot fork's omni voice backend, with
+  `omni_url`, `omni_ref_audio`, `omni_tool_filler` and `omni_asr_dir`. Omni
+  speech is paced out through PcmMedia's playout buffer so barge-in can cut it.
+
 ## [0.4.0] - 2026-09-24
 
 ### Changed

@@ -1,4 +1,7 @@
-"""QQ voice calls for AstrBot, through the NapCat AV bridge and Codex realtime.
+"""QQ voice calls for AstrBot, through the NapCat AV bridge.
+
+Calls run on Codex realtime by default, or on a local MiniCPM-o server
+(``voice_backend = minicpm_omni``).
 
 The bridge (``bridge/``) answers QQ calls and streams the call over one
 WebSocket: text frames carry the call state, binary frames carry audio
@@ -33,6 +36,8 @@ OUTGOING_PROMPT = """You placed this call yourself. The reason: {purpose}"""
 # first, as whoever answers or places a phone call does.
 ANSWER_CUE = "(The call is connected. Answer the phone with a short greeting.)"
 DIAL_CUE = "(The call is connected. Greet them and briefly say why you are calling.)"
+# The omni backend's opening is a purpose the voice agent words (OPENING_PROMPT).
+OMNI_ANSWER_PURPOSE = "对方打来的电话刚接通：简短地打个招呼。"
 
 RECONNECT_SECONDS = 5.0
 # How long a connected call waits for the bridge to name the caller.
@@ -144,6 +149,7 @@ class QQVoiceCallPlugin(Star):
             await self._end_call(f"call {phase}")
 
     async def _start_call(self, invite: str) -> None:
+        from astrbot.core.voice import omni
         from astrbot.core.voice.pcm import PcmMedia
         from astrbot.core.voice.session import VoiceOptions, VoiceSession, time_prompt
 
@@ -181,23 +187,56 @@ class QQVoiceCallPlugin(Star):
             extra_prompt=str(self.config.get("voice_prompt") or ""),
             agent_instructions=str(self.config.get("agent_instructions") or ""),
         )
-        prompt = CALL_PROMPT.format(name=options.name, caller=caller)
-        if outgoing:
-            prompt += "\n\n" + OUTGOING_PROMPT.format(purpose=purpose or "not given")
-        prompt += "\n\n" + time_prompt()
-        if options.extra_prompt:
-            prompt += "\n\n" + options.extra_prompt
+        local = self.config.get("voice_backend") == "minicpm_omni"
+        backend: dict = {}
+        if local:
+            # A call is one to one: no silence bias, as for a Mumble whisper.
+            backend = {
+                "omni": omni.OmniOptions(
+                    url=str(self.config.get("omni_url") or omni.OmniOptions.url),
+                    ref_audio=str(self.config.get("omni_ref_audio") or "").strip(),
+                    silence_bias=0.0,
+                    # Empty on purpose means no acknowledgement.
+                    tool_filler=str(
+                        self.config.get(
+                            "omni_tool_filler", omni.OmniOptions.tool_filler
+                        )
+                        or ""
+                    ),
+                    asr_dir=str(self.config.get("omni_asr_dir") or "").strip(),
+                ),
+                "group": False,
+            }
+            prompt = omni.duplex_prompt(options.name, options.extra_prompt, caller)
+            opening = purpose or OMNI_ANSWER_PURPOSE
+        else:
+            prompt = CALL_PROMPT.format(name=options.name, caller=caller)
+            if outgoing:
+                prompt += "\n\n" + OUTGOING_PROMPT.format(
+                    purpose=purpose or "not given"
+                )
+            prompt += "\n\n" + time_prompt()
+            if options.extra_prompt:
+                prompt += "\n\n" + options.extra_prompt
+            opening = DIAL_CUE if outgoing else ANSWER_CUE
 
         def closed(session) -> None:
             if self.session is session:
                 self.session = None
 
-        session = VoiceSession(
+        session = (omni.OmniVoiceSession if local else VoiceSession)(
+            **backend,
             key=f"call:{uin}",
             scope_id=f"{platform_id}:voice:call:{uin}",
             prompt=prompt,
             options=options,
-            media=PcmMedia(self._send_audio),
+            # The omni server delivers speech ahead of time and cuts it on
+            # barge-in, so it is queued here and paced out (a newer core).
+            media=(
+                PcmMedia(self._send_audio, buffer_seconds=omni.PLAYOUT_BUFFER_SECONDS)
+                if local
+                else PcmMedia(self._send_audio)
+            ),
             on_closed=closed,
             # The caller's private chat: its member tools and memories.
             memory_scope=f"{platform_id}:FriendMessage:{uin}",
@@ -217,7 +256,7 @@ class QQVoiceCallPlugin(Star):
             await asyncio.sleep(0.1)
         if session.closing:
             return
-        await session.say(DIAL_CUE if outgoing else ANSWER_CUE)
+        await session.say(opening)
         # Hang up a call nobody speaks in any more (a forgotten line).
         idle = float(self.config.get("idle_hangup_seconds") or IDLE_HANGUP_SECONDS)
         while self.session is session and not session.closing:

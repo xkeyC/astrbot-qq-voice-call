@@ -23,6 +23,37 @@
     "default": "",
     "hint": "通话配套到该 aiocqhttp 平台上来电者的私聊（工具、权限、记忆）；留空则用第一个 aiocqhttp 平台"
   },
+  "voice_backend": {
+    "description": "语音后端",
+    "type": "string",
+    "default": "codex_realtime",
+    "options": ["codex_realtime", "minicpm_omni"],
+    "hint": "codex_realtime：Codex 实时语音，需要 Codex 执行器登录含语音的 ChatGPT 订阅账号。minicpm_omni：自己部署的 llama.cpp-omni（MiniCPM-o）服务端，对话在本地完成，查询、执行等任务交给语音 Agent 线程（Codex）处理；服务端同一时间只服务一个会话"
+  },
+  "omni_url": {
+    "description": "MiniCPM-o 服务地址",
+    "type": "string",
+    "default": "ws://127.0.0.1:19060/backend",
+    "hint": "仅 minicpm_omni：llama-omni-server 的 WebSocket 地址"
+  },
+  "omni_ref_audio": {
+    "description": "参考音频（音色克隆）",
+    "type": "string",
+    "default": "",
+    "hint": "仅 minicpm_omni，可选：AstrBot 本机的音频文件路径，取前 10 秒作为音色；留空用默认音色"
+  },
+  "omni_tool_filler": {
+    "description": "任务应答语",
+    "type": "string",
+    "default": "好的，我查一下。",
+    "hint": "仅 minicpm_omni，可选：把任务交给后台时先说的一句话；留空则不说"
+  },
+  "omni_asr_dir": {
+    "description": "语音识别模型目录",
+    "type": "string",
+    "default": "",
+    "hint": "仅 minicpm_omni，可选：SenseVoice 与 Silero VAD 模型目录，缺少时自动下载；留空用 data/models/sensevoice"
+  },
   "voice_name": {
     "description": "电话里的名字",
     "type": "string",
@@ -32,13 +63,13 @@
     "description": "音色",
     "type": "string",
     "default": "",
-    "hint": "Codex 实时语音音色：juniper、maple、spruce、ember、vale、breeze、arbor、sol、cove；留空用默认"
+    "hint": "仅 codex_realtime：Codex 实时语音音色：juniper、maple、spruce、ember、vale、breeze、arbor、sol、cove；留空用默认"
   },
   "voice_model": {
     "description": "实时语音模型",
     "type": "string",
     "default": "",
-    "hint": "留空用 Codex 默认"
+    "hint": "仅 codex_realtime：留空用 Codex 默认"
   },
   "voice_prompt": {
     "description": "附加提示词",

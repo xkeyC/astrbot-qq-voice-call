@@ -36,6 +36,12 @@ NapCat bridge plugin ── WebSocket /v1/stream ──────────�
   by the group and paired with `<aiocqhttp platform>:GroupMessage:<group>`, as
   the voice user. Closes it when the phase leaves `connected`.
 - Tells the realtime model the call is up, so the bot speaks first.
+- With `voice_backend: local_cascade` the session is a `CascadeVoiceSession`:
+  instead of WebRTC to Codex, a WebSocket to a local-multimodal-infra
+  `/v1/realtime` server, which runs VAD, ASR, a small chat model and TTS and
+  paces its speech. The plugin sends it Chinese instructions about the call
+  (the Codex prompt is not used); the server hands tasks, hanging up included,
+  back as `tool.call`, run as turns of the paired chat like Codex handoffs.
 - Offers the `qq_voice_call` tool; its permission is whatever the tool
   permission rules give it.
 

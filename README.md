@@ -1,12 +1,22 @@
 # AstrBot QQ Voice Call
 
-让 AstrBot 接听和拨打 QQ 语音电话。通话由 Codex 实时语音全双工完成：边听边说、可以随时打断；遇到需要查资料或动手的事，交给来电者私聊的 Agent 去办（以来电者本人的身份，和文字聊天共用上下文）。
+让 AstrBot 接听和拨打 QQ 语音电话。通话由 Codex 实时语音或本地语音服务全双工完成：边听边说、可以随时打断；遇到需要查资料或动手的事，交给来电者私聊的 Agent 去办（以来电者本人的身份，和文字聊天共用上下文）。
 
 本项目从 [maibot-qq-voice-call](https://github.com/ClaudiaGardner/maibot-qq-voice-call)（GPL-3.0）改造而来：保留了它的 NapCat AV 桥，原来串联的 DashScope ASR → LLM → TTS 整体换成了 AstrBot 的实时语音会话（和 Mumble 平台用的是同一套）。
 
 > 需要 **AstrBot Codex fork**（提供 `astrbot.core.voice`），并在 Codex 执行器里登录一个包含 Codex 语音的 ChatGPT 订阅账号。上游 AstrBot 用不了。
 >
 > 当前版本要求 fork 包含 `astrbot.core.voice.chat.VoiceChat`、`PcmMedia(buffer_seconds=..., trim_silence=...)` 和 `VoiceOptions.media_tcp`（AstrBot `qq-voice` 分支 `d48bea11` 及之后），以及支持 `realtime.host_routes_handoffs` 的 codex binding（codex `79c875d95` 及之后）。
+
+## 语音后端
+
+插件配置 `voice_backend` 二选一：
+
+- `codex_realtime`（默认）：Codex 实时语音，经 WebRTC 连接，需要 ChatGPT 订阅。
+- `local_cascade`：本地语音服务，即 [local-multimodal-infra](https://github.com/mercallureAI/local-multimodal-infra) 的 `/v1/realtime`。服务端跑 Silero VAD → SenseVoice → Qwen3-4B → IndexTTS，模型都在服务端（RTX 3060 12G 可以跑）。插件只传音频、执行它交给后台的事，并把通话信息（来电者、去电原因、怎么挂断）告诉服务端的模型。
+  - 相关配置：`cascade_url`（默认 `ws://127.0.0.1:17890/v1/realtime`）、`cascade_token`（服务端配置了 `LOCAL_MCP_INFER_TOKENS` 时填写）、`cascade_ref_audio`（音色参考 WAV，留空用服务端默认音色）、`cascade_tool_filler`（交给后台时先说的一句话）。
+  - 需要 AstrBot fork 包含 `astrbot.core.voice.cascade`，且 `CascadeVoiceSession` 支持 `instructions` 参数。
+  - 群通话里，服务端靠语音识别出 `voice_name` 来判断是不是在叫它，所以名字最好是识别得出来的中文名。
 
 ## 工作方式
 
@@ -56,6 +66,7 @@ ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0 ~/.local/share/astrbot-qq-voice-call/scripts
 - `bridge_token` 或 `bridge_token_file`：桥的 Token
 - `platform_id`：配套的 aiocqhttp 平台 ID，留空就用第一个
 - `voice_name`、`voice`、`voice_prompt` 等：电话里的名字、音色和附加提示词
+- `voice_backend` 及 `cascade_*`：语音后端，见上文
 
 AstrBot 这边不需要装 PulseAudio 或 parec/pacat。
 

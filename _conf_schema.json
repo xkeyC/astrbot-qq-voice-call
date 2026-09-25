@@ -23,28 +23,64 @@
     "default": "",
     "hint": "通话配套到该 aiocqhttp 平台上来电者的私聊（工具、权限、记忆）；留空则用第一个 aiocqhttp 平台"
   },
+  "voice_backend": {
+    "description": "语音后端",
+    "type": "string",
+    "default": "codex_realtime",
+    "options": [
+      "codex_realtime",
+      "local_cascade"
+    ],
+    "hint": "codex_realtime：Codex 实时语音（WebRTC）；local_cascade：本地语音服务（local-multimodal-infra 的 /v1/realtime：Silero VAD、SenseVoice、Qwen3、IndexTTS，模型都在服务端）"
+  },
+  "cascade_url": {
+    "description": "本地语音服务地址",
+    "type": "string",
+    "default": "ws://127.0.0.1:17890/v1/realtime",
+    "hint": "仅 local_cascade：local-multimodal-infra controller 的 realtime WebSocket 地址"
+  },
+  "cascade_token": {
+    "description": "本地语音服务 Token",
+    "type": "string",
+    "default": "",
+    "secret": true,
+    "hint": "仅 local_cascade：LOCAL_MCP_INFER_TOKENS 中的一个；服务端没配置推理 Token 时留空"
+  },
+  "cascade_ref_audio": {
+    "description": "本地语音音色（参考音频）",
+    "type": "string",
+    "default": "",
+    "hint": "仅 local_cascade：WAV 文件路径（相对路径以 AstrBot data 目录为准，最大 8 MB），会发给服务端用来克隆音色；留空用服务端默认音色"
+  },
+  "cascade_tool_filler": {
+    "description": "交给后台时的应答语",
+    "type": "string",
+    "default": "好的，稍等。",
+    "hint": "仅 local_cascade：把事情交给后台时先说的一句话；留空则不说"
+  },
   "media_over_tcp": {
     "description": "语音媒体走 TCP",
     "type": "bool",
     "default": true,
-    "hint": "通话音频经对端的 TCP 443 传输，不走 UDP。跨境 UDP 丢包（实测约 6%）会让声音断断续续；TCP 不丢包，偶发的延迟由播放缓冲吸收。设置了 Codex 代理时总是走 TCP"
+    "hint": "仅 codex_realtime：通话音频经对端的 TCP 443 传输，不走 UDP。跨境 UDP 丢包（实测约 6%）会让声音断断续续；TCP 不丢包，偶发的延迟由播放缓冲吸收。设置了 Codex 代理时总是走 TCP"
   },
   "voice_name": {
     "description": "电话里的名字",
     "type": "string",
-    "default": "AstrBot"
+    "default": "AstrBot",
+    "hint": "local_cascade 在群通话里靠语音识别出这个名字来判断是不是在叫它，最好用识别得出来的中文名"
   },
   "voice": {
     "description": "音色",
     "type": "string",
     "default": "",
-    "hint": "Codex 实时语音音色：juniper、maple、spruce、ember、vale、breeze、arbor、sol、cove；留空用默认"
+    "hint": "仅 codex_realtime：Codex 实时语音音色：juniper、maple、spruce、ember、vale、breeze、arbor、sol、cove；留空用默认"
   },
   "voice_model": {
     "description": "实时语音模型",
     "type": "string",
     "default": "",
-    "hint": "留空用 Codex 默认"
+    "hint": "仅 codex_realtime：留空用 Codex 默认"
   },
   "voice_prompt": {
     "description": "附加提示词",

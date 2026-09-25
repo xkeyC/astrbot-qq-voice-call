@@ -9,6 +9,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- Local voice backend (`voice_backend: local_cascade`): calls can run on a
+  local-multimodal-infra `/v1/realtime` server (Silero VAD, SenseVoice, Qwen3,
+  IndexTTS) instead of Codex realtime. The server's model is told about the
+  call (caller, purpose of an outgoing call, how to hang up) in Chinese;
+  hanging up is handed to the chat like any task. Settings `cascade_url`,
+  `cascade_token`, `cascade_ref_audio`, `cascade_tool_filler`.
+
 - Group calls: invited to a QQ group call, the bot joins it paired with that
   group's chat, where handed-off tasks run as the fixed voice user (a member),
   and speaks only when addressed by name. `qq_voice_hangup` leaves the call

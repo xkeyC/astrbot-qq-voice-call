@@ -2,5 +2,5 @@ name: astrbot_plugin_qq_voice_call
 display_name: QQ 语音通话
 version: 0.4.0
 author: xkeyC
-description: 接听与拨打 QQ 语音电话，由 Codex 实时语音全双工对话（需要 NapCat AV 桥和 AstrBot Codex fork）
+description: 接听与拨打 QQ 语音电话，由 Codex 实时语音或本地语音服务（local-multimodal-infra）全双工对话（需要 NapCat AV 桥和 AstrBot Codex fork）
 repo: https://github.com/xkeyC/astrbot-qq-voice-call

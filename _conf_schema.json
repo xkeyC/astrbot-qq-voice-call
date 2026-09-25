@@ -58,6 +58,29 @@
     "default": "好的，稍等。",
     "hint": "仅 local_cascade：把事情交给后台时先说的一句话；留空则不说"
   },
+  "cascade_tts_emotion": {
+    "description": "本地语音情绪",
+    "type": "string",
+    "default": "calm",
+    "options": [
+      "calm",
+      "happy",
+      "angry",
+      "sad",
+      "afraid",
+      "disgusted",
+      "melancholic",
+      "surprised",
+      "none"
+    ],
+    "hint": "仅 local_cascade，服务端用 IndexTTS-2.5 时生效：平静、高兴、生气、悲伤、害怕、厌恶、忧郁、惊讶；none 为沿用参考音频的语气。每通电话开始时读取"
+  },
+  "cascade_tts_emotion_strength": {
+    "description": "本地语音情绪强度",
+    "type": "float",
+    "default": 0.8,
+    "hint": "仅 local_cascade：0 到 1，其余部分沿用参考音频的语气"
+  },
   "media_over_tcp": {
     "description": "语音媒体走 TCP",
     "type": "bool",

@@ -318,6 +318,8 @@ def local(setup, monkeypatch):
         cascade_token="secret",
         cascade_ref_audio="voice.wav",
         cascade_tool_filler="稍等。",
+        cascade_tts_emotion="happy",
+        cascade_tts_emotion_strength=0.5,
     )
     return plugin, bridge
 
@@ -339,6 +341,7 @@ async def test_a_call_on_the_local_voice_server(local):
     assert options.token == "secret"
     assert options.ref_audio == "voice.wav"
     assert options.tool_filler == "稍等。"
+    assert options.emotion == "happy" and options.emotion_strength == 0.5
     # The server paces its speech: nothing of it is trimmed, a cut drops the
     # queue.
     assert session.media._queue is not None

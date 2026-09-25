@@ -335,6 +335,12 @@ class QQVoiceCallPlugin(Star):
                     token=str(self.config.get("cascade_token") or ""),
                     ref_audio=str(self.config.get("cascade_ref_audio") or ""),
                     tool_filler=str(self.config.get("cascade_tool_filler") or ""),
+                    emotion=str(self.config.get("cascade_tts_emotion") or ""),
+                    emotion_strength=(
+                        None
+                        if self.config.get("cascade_tts_emotion_strength") in (None, "")
+                        else float(self.config["cascade_tts_emotion_strength"])
+                    ),
                 ),
                 group=bool(group_id),
                 instructions=instructions,

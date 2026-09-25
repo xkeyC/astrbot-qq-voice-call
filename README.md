@@ -14,7 +14,7 @@
 
 - `codex_realtime`（默认）：Codex 实时语音，经 WebRTC 连接，需要 ChatGPT 订阅。
 - `local_cascade`：本地语音服务，即 [local-multimodal-infra](https://github.com/mercallureAI/local-multimodal-infra) 的 `/v1/realtime`。服务端跑 Silero VAD → SenseVoice → Qwen3-4B → IndexTTS，模型都在服务端（RTX 3060 12G 可以跑）。插件只传音频、执行它交给后台的事，并把通话信息（来电者、去电原因、怎么挂断）告诉服务端的模型。
-  - 相关配置：`cascade_url`（默认 `ws://127.0.0.1:17890/v1/realtime`）、`cascade_token`（服务端配置了 `LOCAL_MCP_INFER_TOKENS` 时填写）、`cascade_ref_audio`（音色参考 WAV，留空用服务端默认音色）、`cascade_tool_filler`（交给后台时先说的一句话）。
+  - 相关配置：`cascade_url`（默认 `ws://127.0.0.1:17890/v1/realtime`）、`cascade_token`（服务端配置了 `LOCAL_MCP_INFER_TOKENS` 时填写）、`cascade_ref_audio`（音色参考 WAV，留空用服务端默认音色）、`cascade_tool_filler`（交给后台时先说的一句话）、`cascade_tts_emotion` / `cascade_tts_emotion_strength`（说话情绪和强度，默认平静、0.8，服务端用 IndexTTS-2.5 时生效）。
   - 需要 AstrBot fork 包含 `astrbot.core.voice.cascade`，且 `CascadeVoiceSession` 支持 `instructions` 参数。
   - 群通话里，服务端靠语音识别出 `voice_name` 来判断是不是在叫它，所以名字最好是识别得出来的中文名。
 

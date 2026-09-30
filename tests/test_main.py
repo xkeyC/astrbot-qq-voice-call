@@ -93,7 +93,7 @@ class FakeSession:
         self.kwargs["on_closed"](self)
 
 
-class FakeCascadeSession(FakeSession):
+class FakeInfraSession(FakeSession):
     """A session on the local voice server."""
 
 
@@ -131,6 +131,9 @@ async def setup(monkeypatch):
 
     FakeSession.instances.clear()
     monkeypatch.setattr(voice_session, "VoiceSession", FakeSession)
+    monkeypatch.setattr(
+        voice_session, "realtime_voice_config", lambda: {"backend": "builtin"}
+    )
     bridge = FakeBridge()
     app = web.Application()
     app.router.add_get("/v1/stream", bridge.stream)
@@ -308,20 +311,14 @@ async def test_a_reconnect_to_the_same_call_does_not_greet_again(setup):
 
 @pytest.fixture
 def local(setup, monkeypatch):
-    from astrbot.core.voice import cascade
+    from astrbot.core.voice import infra
+    from astrbot.core.voice import session as voice_session
 
-    monkeypatch.setattr(cascade, "CascadeVoiceSession", FakeCascadeSession)
-    plugin, bridge = setup
-    plugin.config.update(
-        voice_backend="local_cascade",
-        cascade_url="ws://infra:17890/v1/realtime",
-        cascade_token="secret",
-        cascade_ref_audio="voice.wav",
-        cascade_tool_filler="稍等。",
-        cascade_tts_emotion="happy",
-        cascade_tts_emotion_strength=0.5,
+    monkeypatch.setattr(infra, "InfraVoiceSession", FakeInfraSession)
+    monkeypatch.setattr(
+        voice_session, "realtime_voice_config", lambda: {"backend": "local_infra"}
     )
-    return plugin, bridge
+    return setup
 
 
 @pytest.mark.asyncio
@@ -330,54 +327,13 @@ async def test_a_call_on_the_local_voice_server(local):
     await bridge.call(phase="connected", inviteAt="l", callerUin="9", callerName="Bob")
     await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
     session = FakeSession.instances[0]
-    assert type(session) is FakeCascadeSession
+    # The backend is the Codex runner's setting; the call is the same.
+    assert type(session) is FakeInfraSession
     assert session.kwargs["chat"].umo == "qq1:FriendMessage:9"
-    assert session.kwargs["group"] is False
-    instructions = session.kwargs["instructions"]
-    assert "和Bob通话" in instructions and "qq_voice_hangup" in instructions
-    assert "打给对方" not in instructions
-    options = session.kwargs["cascade"]
-    assert options.url == "ws://infra:17890/v1/realtime"
-    assert options.token == "secret"
-    assert options.ref_audio == "voice.wav"
-    assert options.tool_filler == "稍等。"
-    assert options.emotion == "happy" and options.emotion_strength == 0.5
+    assert "with Bob" in session.kwargs["prompt"]
+    assert "qq_voice_hangup" in session.kwargs["prompt"]
     # The server paces its speech: nothing of it is trimmed, a cut drops the
     # queue.
     assert session.media._queue is not None
     assert session.media._trim_silence is False
-    assert session.said == [plugin_main.CASCADE_ANSWER_CUE]
-
-
-@pytest.mark.asyncio
-async def test_a_local_group_call_is_a_channel(local, monkeypatch):
-    monkeypatch.setattr(plugin_main, "IDENTITY_WAIT", 0.1)
-    plugin, bridge = local
-    await bridge.call(phase="connected", inviteAt="lg", scene=3, groupId="555")
-    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
-    session = FakeSession.instances[0]
-    assert session.kwargs["group"] is True
-    assert session.kwargs["chat"].umo == "qq1:GroupMessage:555"
-    assert "555" in session.kwargs["instructions"]
-    assert session.said == [plugin_main.CASCADE_GROUP_CUE]
-
-
-@pytest.mark.asyncio
-async def test_a_local_outgoing_call_knows_its_purpose(local):
-    plugin, bridge = local
-    await plugin.qq_voice_call(FakeEvent(), purpose="提醒明天开会")
-    await bridge.call(phase="connected", inviteAt="lo", callerUin="42", outgoing=True)
-    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
-    session = FakeSession.instances[0]
-    assert "提醒明天开会" in session.kwargs["instructions"]
-    assert session.said == [plugin_main.CASCADE_DIAL_CUE]
-
-
-@pytest.mark.asyncio
-async def test_an_unknown_backend_falls_back_to_codex(local):
-    plugin, bridge = local
-    plugin.config["voice_backend"] = "carrier-pigeon"
-    await bridge.call(phase="connected", inviteAt="u", callerUin="1")
-    await wait_for(lambda: FakeSession.instances and FakeSession.instances[0].said)
-    assert type(FakeSession.instances[0]) is FakeSession
-    assert FakeSession.instances[0].said == [plugin_main.ANSWER_CUE]
+    assert session.said == [plugin_main.ANSWER_CUE]

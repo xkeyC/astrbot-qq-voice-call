@@ -1,5 +1,7 @@
-"""QQ voice calls for AstrBot, through the NapCat AV bridge, on Codex
-realtime or a local voice server (local-multimodal-infra ``/v1/realtime``).
+"""QQ voice calls for AstrBot, through the NapCat AV bridge, on AstrBot's
+realtime voice (Codex realtime, or a local-multimodal-infra server with a
+model of the Codex runner doing the talking: the runner's ``realtime_voice``
+setting).
 
 The bridge (``bridge/``) answers QQ calls and streams the call over one
 WebSocket: text frames carry the call state, binary frames carry audio
@@ -10,8 +12,8 @@ permissions, the chat's context, persona, tools and memories). A group call
 the bot is invited to is paired with that group's chat instead, where turns
 run as the fixed voice user (speakers cannot be told apart).
 
-Needs the AstrBot Codex fork (``astrbot.core.voice``; the local backend also
-``astrbot.core.voice.cascade``).
+Needs the AstrBot Codex fork (``astrbot.core.voice`` with
+``new_voice_session``).
 """
 
 from __future__ import annotations
@@ -47,20 +49,6 @@ When you are asked to leave the call, say a short goodbye and delegate, in exact
 ANSWER_CUE = "(The call is connected. Answer the phone with a short greeting.)"
 DIAL_CUE = "(The call is connected. Greet them and briefly say why you are calling.)"
 GROUP_CUE = "(You joined the group call. Greet everyone with one short sentence.)"
-# The local voice server (``voice_backend: local_cascade``) runs its own
-# prompt; it is told about the call in these words instead of the prompts
-# above. Hanging up is a task for the backend like any other.
-CASCADE_CALL = """这是一通 QQ 语音电话，你在和{caller}通话，说话像打电话一样简短自然。
-
-对方想结束通话（道别、让你挂电话）时，先简短道别，再调用 backend_task，task 写：挂断这个 QQ 通话（用 qq_voice_hangup 工具）。"""
-CASCADE_OUTGOING = "这通电话是你打给对方的，原因：{purpose}"
-CASCADE_GROUP = """这是 QQ 群“{group}”的群语音通话，是{caller}邀请你加入的。
-
-有人让你退出通话时，先简短道别，再调用 backend_task，task 写：退出这个 QQ 群通话（用 qq_voice_hangup 工具）。"""
-CASCADE_ANSWER_CUE = "电话接通了，接起电话，简短地打个招呼。"
-CASCADE_DIAL_CUE = "电话接通了，打个招呼，简短说明为什么打这个电话。"
-CASCADE_GROUP_CUE = "你加入了群通话，用一句话跟大家打个招呼。"
-BACKENDS = ("codex_realtime", "local_cascade")
 # AVSDK scene of a group call, as the bridge reports it.
 SCENE_GROUP = 3
 
@@ -195,7 +183,11 @@ class QQVoiceCallPlugin(Star):
     async def _start_call(self, invite: str) -> None:
         from astrbot.core.voice.chat import VoiceChat
         from astrbot.core.voice.pcm import PcmMedia
-        from astrbot.core.voice.session import VoiceOptions, VoiceSession, time_prompt
+        from astrbot.core.voice.session import (
+            VoiceOptions,
+            new_voice_session,
+            realtime_voice_config,
+        )
 
         # The caller's QQ number is looked up by the bridge; give it a moment.
         deadline = time.monotonic() + IDENTITY_WAIT
@@ -230,19 +222,12 @@ class QQVoiceCallPlugin(Star):
         )
         self.dialing = None
         caller = str(self.call.get("callerName") or uin or "someone")
-        backend = str(self.config.get("voice_backend") or "codex_realtime")
-        if backend not in BACKENDS:
-            logger.warning(
-                "QQ voice call: unknown voice_backend %r, using codex_realtime",
-                backend,
-            )
-            backend = "codex_realtime"
-        local = backend == "local_cascade"
+        # The realtime voice backend is a setting of the Codex runner.
+        backend = str(realtime_voice_config()["backend"])
+        local = backend == "local_infra"
         options = VoiceOptions(
             name=str(self.config.get("voice_name") or "AstrBot"),
             aliases=[],
-            voice=str(self.config.get("voice") or ""),
-            model=str(self.config.get("voice_model") or ""),
             extra_prompt=str(self.config.get("voice_prompt") or ""),
             # UDP to the realtime peer loses packets on long paths, heard as
             # choppy audio; TCP does not (see astrbot.core.voice.icetcp).
@@ -254,11 +239,6 @@ class QQVoiceCallPlugin(Star):
                 name=options.name, group=group_id, caller=caller
             )
             opening = GROUP_CUE
-            instructions = CASCADE_GROUP.format(
-                group=group_id,
-                caller=str(self.call.get("callerName") or uin or "群里的人"),
-            )
-            local_opening = CASCADE_GROUP_CUE
             key = f"group:{group_id}"
             label = f"group {group_id}"
             chat = VoiceChat(
@@ -273,12 +253,6 @@ class QQVoiceCallPlugin(Star):
                     purpose=purpose or "not given"
                 )
             opening = DIAL_CUE if outgoing else ANSWER_CUE
-            instructions = CASCADE_CALL.format(caller=caller)
-            if outgoing:
-                instructions += "\n\n" + CASCADE_OUTGOING.format(
-                    purpose=purpose or "没有说明"
-                )
-            local_opening = CASCADE_DIAL_CUE if outgoing else CASCADE_ANSWER_CUE
             key = f"call:{uin}"
             label = uin
             # What is asked on the phone runs in the caller's private chat, as
@@ -290,8 +264,7 @@ class QQVoiceCallPlugin(Star):
                 sender_name=caller,
                 via="QQ voice call",
             )
-        # The session appends the voice persona or voice_prompt.
-        prompt += "\n\n" + time_prompt()
+        # The session adds the voice persona (or voice_prompt) and the time.
 
         def closed(session) -> None:
             if self.session is session:
@@ -316,37 +289,15 @@ class QQVoiceCallPlugin(Star):
                 buffer_seconds=REALTIME_BUFFER,
                 # A realtime peer sends silence all along: skipping it while a
                 # backlog exists keeps a stall from adding lasting latency.
-                # The local server sends only speech, at real-time pace: its
-                # pauses are part of it.
+                # The local voice server sends only speech, at real-time pace:
+                # its pauses are part of it.
                 trim_silence=not local,
             ),
             on_closed=closed,
             chat=chat,
             label="QQ call",
         )
-        if local:
-            from astrbot.core.voice.cascade import CascadeOptions, CascadeVoiceSession
-
-            opening = local_opening
-            session = CascadeVoiceSession(
-                **session_kwargs,
-                cascade=CascadeOptions(
-                    url=str(self.config.get("cascade_url") or CascadeOptions.url),
-                    token=str(self.config.get("cascade_token") or ""),
-                    ref_audio=str(self.config.get("cascade_ref_audio") or ""),
-                    tool_filler=str(self.config.get("cascade_tool_filler") or ""),
-                    emotion=str(self.config.get("cascade_tts_emotion") or ""),
-                    emotion_strength=(
-                        None
-                        if self.config.get("cascade_tts_emotion_strength") in (None, "")
-                        else float(self.config["cascade_tts_emotion_strength"])
-                    ),
-                ),
-                group=bool(group_id),
-                instructions=instructions,
-            )
-        else:
-            session = VoiceSession(**session_kwargs)
+        session = new_voice_session(**session_kwargs)
         self.session = session
         session.launch(
             lambda exc: logger.error("QQ voice call with %s failed: %s", label, exc)

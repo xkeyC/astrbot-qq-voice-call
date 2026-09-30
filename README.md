@@ -10,13 +10,12 @@
 
 ## 语音后端
 
-插件配置 `voice_backend` 二选一：
+语音后端是 AstrBot 的全局设置，在 WebUI 的 **Codex 页面 → 实时语音** 中选择，插件不再单独配置：
 
-- `codex_realtime`（默认）：Codex 实时语音，经 WebRTC 连接，需要 ChatGPT 订阅。
-- `local_cascade`：本地语音服务，即 [local-multimodal-infra](https://github.com/mercallureAI/local-multimodal-infra) 的 `/v1/realtime`。服务端跑 Silero VAD → SenseVoice → Qwen3-4B → IndexTTS，模型都在服务端（RTX 3060 12G 可以跑）。插件只传音频、执行它交给后台的事，并把通话信息（来电者、去电原因、怎么挂断）告诉服务端的模型。
-  - 相关配置：`cascade_url`（默认 `ws://127.0.0.1:17890/v1/realtime`）、`cascade_token`（服务端配置了 `LOCAL_MCP_INFER_TOKENS` 时填写）、`cascade_ref_audio`（音色参考 WAV，留空用服务端默认音色）、`cascade_tool_filler`（交给后台时先说的一句话）、`cascade_tts_emotion` / `cascade_tts_emotion_strength`（说话情绪和强度，默认平静、0.8，服务端用 IndexTTS-2.5 时生效）。
-  - 需要 AstrBot fork 包含 `astrbot.core.voice.cascade`，且 `CascadeVoiceSession` 支持 `instructions` 参数。
-  - 群通话里，服务端靠语音识别出 `voice_name` 来判断是不是在叫它，所以名字最好是识别得出来的中文名。
+- **Codex 实时语音**（默认）：经 WebRTC 连接，需要 ChatGPT 订阅。
+- **local-multimodal-infra**：自己部署的 [local-multimodal-infra](https://github.com/mercallureAI/local-multimodal-infra) 负责收听和发声（切句、识别、打断、TTS），Codex 直接连接它，并用你选择的模型（例如 DeepSeek）负责对话。服务地址、令牌、音色、情绪也在那里设置。
+- 两种后端用的是同一套通话提示词：交办的事（包括挂断）都交给来电者私聊的 Agent。群通话里靠语音识别出 `voice_name` 判断是不是在叫机器人，名字最好是识别得出来的。
+- 需要 AstrBot fork 提供 `astrbot.core.voice.session.new_voice_session`。
 
 ## 工作方式
 
@@ -65,8 +64,7 @@ ASTRBOT_QQ_CALL_BRIDGE_HOST=0.0.0.0 ~/.local/share/astrbot-qq-voice-call/scripts
 - `bridge_url`：桥的地址，默认 `http://127.0.0.1:6110`
 - `bridge_token` 或 `bridge_token_file`：桥的 Token
 - `platform_id`：配套的 aiocqhttp 平台 ID，留空就用第一个
-- `voice_name`、`voice`、`voice_prompt` 等：电话里的名字、音色和附加提示词
-- `voice_backend` 及 `cascade_*`：语音后端，见上文
+- `voice_name`、`voice_prompt` 等：电话里的名字和附加提示词（音色等在 Codex 页面的“实时语音”里设置）
 
 AstrBot 这边不需要装 PulseAudio 或 parec/pacat。
 

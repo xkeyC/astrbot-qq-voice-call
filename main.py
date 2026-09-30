@@ -61,9 +61,10 @@ DIAL_TIMEOUT = 90.0
 # The bridge may take a while to dial (uid lookup, AV host round trips).
 DIAL_REQUEST_TIMEOUT = 30.0
 IDLE_HANGUP_SECONDS = 120.0
-# A voice session not listening by then is given up and the call hung up (a
-# local voice server loads its models first, up to five minutes).
-START_TIMEOUT = 330.0
+# A voice session not listening by then is given up and the call hung up; a
+# local voice server loads its models first (the session waits 320 s for it).
+START_TIMEOUT = 150.0
+START_TIMEOUT_LOCAL = 380.0
 # Attempts, and the pause between them, to end a call the bridge failed to.
 HANGUP_ATTEMPTS = 3
 HANGUP_RETRY_SECONDS = 10.0
@@ -319,7 +320,9 @@ class QQVoiceCallPlugin(Star):
         # hangs is given up the same way.
         started = time.monotonic()
         while not session.ready and not session.closing:
-            if time.monotonic() - started > START_TIMEOUT:
+            if time.monotonic() - started > (
+                START_TIMEOUT_LOCAL if local else START_TIMEOUT
+            ):
                 logger.warning("QQ voice call with %s: voice did not start", label)
                 await session.close("start timed out")
                 return

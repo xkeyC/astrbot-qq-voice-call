@@ -13,7 +13,9 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   Codex realtime, or a local-multimodal-infra server listening and speaking
   while a model of the Codex runner does the talking. The plugin's own
   `voice_backend`, `cascade_*`, `voice` and `voice_model` settings are gone;
-  the call prompts are the same for both backends.
+  the call prompts are the same for both backends. Upgrade AstrBot first:
+  it takes the old settings over from this plugin's config file once, which
+  an upgraded plugin would already have dropped.
 
 - Group calls: invited to a QQ group call, the bot joins it paired with that
   group's chat, where handed-off tasks run as the fixed voice user (a member),

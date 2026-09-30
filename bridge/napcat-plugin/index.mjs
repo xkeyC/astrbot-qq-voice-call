@@ -32,6 +32,14 @@ const SCENE_GROUP = 3;
 // timeout (20005). See the StartCall notes in bridge/PROTOCOL.md.
 const CALL_END_OUTPUTS = new Set([20018, 20019, 20022, 20011, 20005]);
 const AUDIO_RETRY_MS = 2000;
+// QQ's AVSDK opens PulseAudio connections for calls and never closes them;
+// at PulseAudio's limit (64) the audio server refuses every new one and
+// calls go silent. Once a call has ended, the AV host is restarted while
+// idle when it holds `avHostPulseLimit` connections (or none can be made).
+const AV_HOST_CHECK_DELAY_MS = 5000;
+// The restarted AV host is logged in again once it is back.
+const AV_HOST_RESTART_LOGIN_DELAY_MS = 3000;
+const PACTL_TIMEOUT_MS = 5000;
 
 let logger = null;
 let pluginContext = null;
@@ -53,6 +61,8 @@ let capture = null;
 let playback = null;
 let audioRetryAt = 0;
 let dialTimer = null;
+let avHostCheckTimer = null;
+let avHostRestarts = 0;
 
 const state = {
   startedAt: null,
@@ -102,6 +112,10 @@ function idleAVHost() {
     lastError: null,
     // Recent AVSDK log lines (output 20050): they echo parsed call parameters.
     logs: [],
+    // PulseAudio clients at the last check after a call, and restarts.
+    pulseClients: null,
+    restarts: avHostRestarts,
+    lastRestartAt: null,
   };
 }
 
@@ -189,7 +203,21 @@ export function parseBridgeSettings(env = process.env, pluginDir = PLUGIN_DIR) {
     // Keep AVSDK log lines (they contain uids and call parameters) in
     // /v1/status for debugging.
     keepAvsdkLogs: env.ASTRBOT_QQ_CALL_AVSDK_LOGS === "1",
+    // PulseAudio connections (of 64) at which the idle AV host is restarted;
+    // 0 never restarts it.
+    avHostPulseLimit: pulseLimitSetting(
+      env.ASTRBOT_QQ_CALL_AV_HOST_PULSE_LIMIT ?? fileConfig.avHostPulseLimit,
+    ),
   };
+}
+
+function pulseLimitSetting(value) {
+  if (value === undefined || value === "") return 32;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 63) {
+    throw new Error("AV host PulseAudio limit must be an integer from 0 to 63");
+  }
+  return parsed;
 }
 
 function loadControlToken(config) {
@@ -470,6 +498,71 @@ function endCall(reason) {
     endedAt: new Date().toISOString(),
     endReason: reason,
   };
+  scheduleAVHostCheck();
+}
+
+function callIdle() {
+  return ["idle", "ended", "error"].includes(state.call.phase);
+}
+
+// The PulseAudio clients connected now (the check's own included), null if
+// none can connect (the server is full or gone), undefined if pactl cannot
+// run here.
+function pulseClientCount() {
+  return new Promise((resolve) => {
+    let output = "";
+    const child = spawn("pactl", ["list", "short", "clients"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const timer = setTimeout(() => child.kill("SIGKILL"), PACTL_TIMEOUT_MS);
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve(undefined);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? output.split("\n").filter((line) => line.trim()).length : null);
+    });
+  });
+}
+
+function scheduleAVHostCheck() {
+  if (!settings?.avHostPulseLimit) return;
+  if (avHostCheckTimer) clearTimeout(avHostCheckTimer);
+  avHostCheckTimer = setTimeout(() => {
+    avHostCheckTimer = null;
+    void checkAVHost().catch((error) => {
+      state.avHost.lastError = `AV host check failed: ${error?.message ?? String(error)}`;
+    });
+  }, AV_HOST_CHECK_DELAY_MS);
+  avHostCheckTimer.unref?.();
+}
+
+/**
+ * Restarts the idle AV host once it holds too many PulseAudio connections.
+ *
+ * @param {() => Promise<number | null | undefined>} countClients
+ *   PulseAudio clients now: null if none can connect, undefined if unknown.
+ * @returns {Promise<boolean>} Whether the AV host was restarted.
+ */
+export async function checkAVHost(countClients = pulseClientCount) {
+  if (!settings || !callIdle()) return false;
+  const clients = await countClients();
+  if (clients === undefined) return false;
+  state.avHost.pulseClients = clients;
+  // A call that came meanwhile keeps it.
+  if ((clients !== null && clients < settings.avHostPulseLimit) || !callIdle()) return false;
+  await requestAVHost("/v1/restart", {});
+  avHostRestarts += 1;
+  state.avHost = { ...idleAVHost(), pulseClients: clients, lastRestartAt: new Date().toISOString() };
+  logger?.warn(
+    `[AstrBotQQCall] AV host restarted: it held ${clients ?? "all"} PulseAudio connections`,
+  );
+  if (pluginContext) scheduleAVHostLogin(pluginContext, AV_HOST_RESTART_LOGIN_DELAY_MS);
+  return true;
 }
 
 async function hangup(reason = "hangup") {
@@ -498,13 +591,17 @@ function leaveGroupCall() {
 
 function invokeAVHost(command, params, retries = 2) {
   debugRecord(debug.invokes, { command, params: debugText(params) });
+  return requestAVHost("/v1/invoke", { command, params }, retries);
+}
+
+function requestAVHost(pathname, body, retries = 2) {
   return new Promise((resolve, reject) => {
-    const encoded = Buffer.from(JSON.stringify({ command, params }));
+    const encoded = Buffer.from(JSON.stringify(body));
     const request = http.request(
       {
         host: settings.avHost,
         port: settings.avPort,
-        path: "/v1/invoke",
+        path: pathname,
         method: "POST",
         headers: {
           Authorization: `Bearer ${controlToken}`,
@@ -526,7 +623,7 @@ function invokeAVHost(command, params, retries = 2) {
       // Only a refused connection proves the command never ran: a timed-out
       // StartCall or Close may have, and must not be sent twice.
       if (retries > 0 && error?.code === "ECONNREFUSED") {
-        setTimeout(() => invokeAVHost(command, params, retries - 1).then(resolve, reject), 250);
+        setTimeout(() => requestAVHost(pathname, body, retries - 1).then(resolve, reject), 250);
       } else reject(error);
     });
     request.end(encoded);
@@ -1183,6 +1280,8 @@ export const plugin_cleanup = async () => {
   streamTimer = null;
   if (dialTimer) clearTimeout(dialTimer);
   dialTimer = null;
+  if (avHostCheckTimer) clearTimeout(avHostCheckTimer);
+  avHostCheckTimer = null;
   for (const socket of streamClients) socket.destroy();
   streamClients.clear();
   lastStreamedCall = "";

@@ -27,6 +27,10 @@ export ASTRBOT_QQ_CALL_QQ_DIR="$qq_dir"
 export ASTRBOT_QQ_CALL_AVSDK_PATH="$avsdk_path"
 export ASTRBOT_QQ_CALL_BRIDGE_TOKEN_FILE="$token_file"
 export PULSE_SERVER="$pulse_server"
+# Restarted when it exits: the bridge may then restart it (/v1/restart).
+if [[ ${ASTRBOT_QQ_CALL_RESTART_AV_HOST:-1} == 1 ]]; then
+  export ASTRBOT_QQ_CALL_AV_HOST_SUPERVISED=1
+fi
 avsdk_dir=$(dirname -- "$avsdk_path")
 export LD_LIBRARY_PATH="$avsdk_dir:$avsdk_dir/bugly${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 

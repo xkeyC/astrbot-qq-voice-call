@@ -130,6 +130,16 @@ function startControlServer() {
         },
       });
     }
+    if (req.method === "POST" && url.pathname === "/v1/restart") {
+      // The bridge restarts a host that leaked audio connections; only a
+      // supervised one (run-av-host.sh starts it again) may exit.
+      if (process.env.ASTRBOT_QQ_CALL_AV_HOST_SUPERVISED !== "1") {
+        return sendJson(res, 409, { code: -1, message: "the AV host is not supervised" });
+      }
+      sendJson(res, 200, { code: 0, data: null });
+      setTimeout(() => app.exit(0), 200);
+      return undefined;
+    }
     if (req.method === "POST" && url.pathname === "/v1/invoke") {
       try {
         const body = await readJsonBody(req);

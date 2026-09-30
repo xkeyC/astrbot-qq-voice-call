@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   buildAcceptParams,
   buildStartCallParams,
+  checkAVHost,
   decodeWsFrames,
   encodeWsFrame,
   parseBridgeSettings,
@@ -95,6 +96,14 @@ test("only the internal AV host endpoint must stay on loopback", () => {
     () => parseBridgeSettings({ ASTRBOT_QQ_CALL_AV_HOST_HOST: "0.0.0.0" }, os.tmpdir()),
     /loopback/,
   );
+});
+
+test("the AV host PulseAudio limit defaults to half of PulseAudio's", () => {
+  assert.equal(parseBridgeSettings({}, os.tmpdir()).avHostPulseLimit, 32);
+  const off = { ASTRBOT_QQ_CALL_AV_HOST_PULSE_LIMIT: "0" };
+  assert.equal(parseBridgeSettings(off, os.tmpdir()).avHostPulseLimit, 0);
+  const tooMany = { ASTRBOT_QQ_CALL_AV_HOST_PULSE_LIMIT: "64" };
+  assert.throws(() => parseBridgeSettings(tooMany, os.tmpdir()), /0 to 63/);
 });
 
 test("WebSocket frames round-trip, masked or not, at every length form", () => {
@@ -351,6 +360,72 @@ test("group calls: AVSDK logs in without a replacement uid, leaves with Quit", a
     assert.equal(current.phase, "ended");
     assert.equal(current.endReason, "avsdk 20009");
     await waitFor(() => invoked.some((item) => item.command === 8));
+  } finally {
+    await plugin_cleanup();
+    await new Promise((resolve) => avHost.close(resolve));
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("an idle AV host holding too many PulseAudio connections is restarted and logged in", async () => {
+  const controlPort = await unusedLoopbackPort();
+  const avPort = await unusedLoopbackPort();
+  const token = "test-token-that-is-longer-than-thirty-two-bytes";
+  const env = {
+    ASTRBOT_QQ_CALL_BRIDGE_TOKEN: token,
+    ASTRBOT_QQ_CALL_BRIDGE_PORT: String(controlPort),
+    ASTRBOT_QQ_CALL_AV_HOST_PORT: String(avPort),
+  };
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  const requests = [];
+  const avHost = http.createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    requests.push({ path: req.url, body: JSON.parse(body) });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end('{"code":0}');
+  });
+  await new Promise((resolve) => avHost.listen(avPort, "127.0.0.1", resolve));
+  const context = {
+    logger: { info() {}, warn() {}, error() {} },
+    router: { get() {} },
+    core: {
+      selfInfo: { uid: "u_self", uin: "10001" },
+      dataPath: "/data",
+      context: { session: { getAVSDKService: () => null } },
+    },
+  };
+  const logins = () => requests.filter((item) => item.body.command === 1).length;
+  const restarts = () => requests.filter((item) => item.path === "/v1/restart").length;
+  const waitFor = async (predicate) => {
+    for (let i = 0; i < 300 && !predicate(); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(predicate());
+  };
+  try {
+    await plugin_init(context);
+    await waitFor(() => logins() === 1);
+    // Below the limit, or pactl unavailable: left alone.
+    assert.equal(await checkAVHost(async () => 10), false);
+    assert.equal(await checkAVHost(async () => undefined), false);
+    assert.equal(restarts(), 0);
+    // At the limit, or PulseAudio full: restarted, then logged in again.
+    assert.equal(await checkAVHost(async () => 40), true);
+    assert.equal(restarts(), 1);
+    await waitFor(() => logins() === 2);
+    assert.equal(await checkAVHost(async () => null), true);
+    assert.equal(restarts(), 2);
+    const status = await fetch(`http://127.0.0.1:${controlPort}/v1/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const avHostState = (await status.json()).data.avHost;
+    assert.equal(avHostState.restarts, 2);
+    assert.equal(avHostState.pulseClients, null);
   } finally {
     await plugin_cleanup();
     await new Promise((resolve) => avHost.close(resolve));

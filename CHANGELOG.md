@@ -27,6 +27,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Calls going silent after many calls: QQ's AVSDK opens PulseAudio
+  connections for calls and never closes them, and at PulseAudio's limit (64)
+  no audio flows. After a call, the idle AV host is restarted and logged in
+  again once it holds `ASTRBOT_QQ_CALL_AV_HOST_PULSE_LIMIT` (default 32)
+  connections. Needs the NapCat image rebuilt.
 - The AV host no longer logs in to AVSDK with the QQ number as replacement
   uid: rooms saw it as an unknown member "0" beside the silent bot account.
 - A group call was hung up as a one-to-one call, which dropped the audio but

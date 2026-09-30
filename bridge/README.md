@@ -49,6 +49,9 @@ sudo apt-get install pulseaudio pulseaudio-utils xvfb curl
 - `ASTRBOT_QQ_CALL_BRIDGE_CONNECT_HOST`：可选，AV Host 回连桥用的地址（默认：监听地址是
   `0.0.0.0`/`::` 时用 `127.0.0.1`，否则用监听地址）
 - `ASTRBOT_QQ_CALL_AV_HOST_HOST` / `ASTRBOT_QQ_CALL_AV_HOST_PORT`
+- `ASTRBOT_QQ_CALL_AV_HOST_PULSE_LIMIT`：QQ 的 AVSDK 每次通话都会新开 PulseAudio 连接且不关闭，
+  攒满 PulseAudio 的上限（64）后通话就没有声音。通话结束后空闲时，AV Host 占用的连接数达到这个值
+  （默认 32，`0` 关闭）就由桥重启它（`run-av-host.sh` 会再拉起）并重新登录
 - `ASTRBOT_QQ_CALL_AVSDK_LOGS=1`：调试模式，逆向和排查用（记录里有 uid 和通话参数，默认关闭）。
   AVSDK 日志行保存在 `/v1/status` 里；另有 `GET /v1/debug?since=<ISO 时间>`（AVSDK 原始输出、
   内核事件、发出的指令）、`POST /v1/debug/clear`、`POST /v1/debug/invoke`

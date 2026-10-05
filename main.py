@@ -38,6 +38,20 @@ When the caller wants to end the call (asks you to hang up, says goodbye), say a
 
 OUTGOING_PROMPT = """You placed this call yourself. The reason: {purpose}"""
 
+# When the voice model of a group call speaks, for an AstrBot without
+# ``group_rule`` (before wake words).
+OLD_RULE = "Speak only when someone says your name to you, or is directly continuing an exchange with you from a few seconds ago; otherwise stay completely silent (no audio, no text)."
+
+
+def room_rule(options, *, gated: bool) -> str:
+    """The core's rule for a group call; the old one with an older core."""
+    try:
+        from astrbot.core.voice.session import group_rule
+    except ImportError:
+        return OLD_RULE
+    return group_rule(options, gated=gated)
+
+
 GROUP_PROMPT = """Your name is {name}. You are in a QQ group voice call of the group "{group}", invited by {caller}. Several people may be in the call, and much of the talk is them talking to each other.
 
 {rule} When addressed, answer briefly in the speaker's language. Delegate real tasks (anything needing facts, lookups or work) to the backend and tell the result briefly.
@@ -187,7 +201,6 @@ class QQVoiceCallPlugin(Star):
         from astrbot.core.voice.pcm import PcmMedia
         from astrbot.core.voice.session import (
             VoiceOptions,
-            group_rule,
             new_voice_session,
             realtime_voice_config,
         )
@@ -246,7 +259,7 @@ class QQVoiceCallPlugin(Star):
                 name=options.name,
                 group=group_id,
                 caller=caller,
-                rule=group_rule(options, gated=local),
+                rule=room_rule(options, gated=local),
             )
             opening = GROUP_CUE
             key = f"group:{group_id}"

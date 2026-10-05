@@ -337,3 +337,15 @@ async def test_a_call_on_the_local_voice_server(local):
     assert session.media._queue is not None
     assert session.media._trim_silence is False
     assert session.said == [plugin_main.ANSWER_CUE]
+
+
+def test_a_group_call_rule_is_the_cores_or_else_the_old_one(monkeypatch):
+    session = pytest.importorskip("astrbot.core.voice.session")
+    options = session.VoiceOptions(name="Jarvis", aliases=[])
+    if hasattr(session, "group_rule"):
+        assert plugin_main.room_rule(options, gated=True) == session.group_rule(
+            options, gated=True
+        )
+        monkeypatch.delattr(session, "group_rule")
+    # An older core: the call still starts, with the old rule.
+    assert plugin_main.room_rule(options, gated=True) == plugin_main.OLD_RULE

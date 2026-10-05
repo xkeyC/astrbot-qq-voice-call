@@ -38,9 +38,9 @@ When the caller wants to end the call (asks you to hang up, says goodbye), say a
 
 OUTGOING_PROMPT = """You placed this call yourself. The reason: {purpose}"""
 
-GROUP_PROMPT = """Your name is {name}. You are in a QQ group voice call of the group "{group}", invited by {caller}. Several people may be in the call, and much of what you hear is them talking to each other.
+GROUP_PROMPT = """Your name is {name}. You are in a QQ group voice call of the group "{group}", invited by {caller}. Several people may be in the call, and much of the talk is them talking to each other.
 
-Speak only when someone says your name to you, or is directly continuing an exchange with you from a few seconds ago; otherwise stay completely silent (no audio, no text). When addressed, answer briefly in the speaker's language. Delegate real tasks (anything needing facts, lookups or work) to the backend and tell the result briefly.
+{rule} When addressed, answer briefly in the speaker's language. Delegate real tasks (anything needing facts, lookups or work) to the backend and tell the result briefly.
 
 When you are asked to leave the call, say a short goodbye and delegate, in exactly these words, "Leave this QQ group call with the qq_voice_hangup tool.": only the backend can hang up, and it needs these words to know that it must."""
 
@@ -187,6 +187,7 @@ class QQVoiceCallPlugin(Star):
         from astrbot.core.voice.pcm import PcmMedia
         from astrbot.core.voice.session import (
             VoiceOptions,
+            group_rule,
             new_voice_session,
             realtime_voice_config,
         )
@@ -229,7 +230,11 @@ class QQVoiceCallPlugin(Star):
         local = backend == "local_infra"
         options = VoiceOptions(
             name=str(self.config.get("voice_name") or "AstrBot"),
-            aliases=[],
+            aliases=[
+                str(a).strip()
+                for a in (self.config.get("voice_aliases") or [])
+                if str(a).strip()
+            ],
             extra_prompt=str(self.config.get("voice_prompt") or ""),
             # UDP to the realtime peer loses packets on long paths, heard as
             # choppy audio; TCP does not (see astrbot.core.voice.icetcp).
@@ -238,7 +243,10 @@ class QQVoiceCallPlugin(Star):
         if group_id:
             # The group's chat, as the voice user: a group call is a channel.
             prompt = GROUP_PROMPT.format(
-                name=options.name, group=group_id, caller=caller
+                name=options.name,
+                group=group_id,
+                caller=caller,
+                rule=group_rule(options, gated=local),
             )
             opening = GROUP_CUE
             key = f"group:{group_id}"

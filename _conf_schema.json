@@ -33,7 +33,14 @@
     "description": "电话里的名字",
     "type": "string",
     "default": "AstrBot",
-    "hint": "群通话里靠语音识别出这个名字来判断是不是在叫它，最好用识别得出来的中文名"
+    "hint": "群通话里有人叫到这个名字（或下面的别名）时它才回应"
+  },
+  "voice_aliases": {
+    "description": "名字的其他叫法",
+    "type": "list",
+    "items": {"type": "string"},
+    "default": [],
+    "hint": "也算在叫它的其他名字。字母和数字混写的名字（如 Mon3tr）要另外写出它的读法，例如 monster、梦三特"
   },
   "voice_prompt": {
     "description": "附加提示词",

@@ -16,7 +16,7 @@ AstrBot. The MaiBot plugin code was replaced.
 AstrBot is available under AGPL-3.0. This plugin runs inside AstrBot and uses
 its voice session module (`astrbot.core.voice`) of the Codex fork.
 
-<https://github.com/xkeyC/AstrBot>
+<https://github.com/xkeyC/AstrBotX>
 
 ## aiohttp
 
